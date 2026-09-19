@@ -63,6 +63,58 @@ python3 scripts/build_snapshot.py && python3 scripts/build_prototype.py
 
 ---
 
+## 国际数据源全面探测结论（2026-09-20）
+
+用户提出「不执着于国内源」后，系统性探测了境外方案。**结论：免费且无需 key 的
+全球指数源已不存在。**
+
+### 逐一验证结果
+
+| 源 | 境内云函数 | GitHub runner（Azure westus3） | 结论 |
+|---|---|---|---|
+| **Yahoo Finance** | ❌ Edge: Too Many Requests | ❌ **HTTP 429，51 个指数全挂** | 对**所有机房 IP** 限流，全球通杀 |
+| **stooq** | — | ❌ proof-of-work 人机验证 | 绕过属规避 bot 检测，不采用 |
+| Twelve Data | ✅ 可达 | ✅ `/indices` 列表免 key 可读 | 时序数据需免费 key |
+| FMP / EODHD / Alpha Vantage / Marketstack | ✅ 均可达 | ✅ | 均需 key |
+| ECB SDW | ✅ | ✅ | 仅汇率，无股指 |
+| GitHub raw / API / jsDelivr | ✅ | ✅ | 可作「境外预处理 + 境内读取」通道 |
+| Wikipedia | ❌ 超时 | ✅ | 云函数出境部分受限 |
+
+> GitHub Actions 方案本身可行（通道已验证），**但它依赖的 Yahoo 挂了**，
+> 所以这条路当前没有可用的数据来源，不是通道问题。
+
+### Twelve Data 免费档覆盖（`/indices` 免 key 实测 1300 个指数）
+
+能补上：泰国 SET、马来西亚 KLSE、菲律宾 PSEI、奥地利 ATX、瑞典 OMX、丹麦 OMXC25、
+挪威 OSEAX、希腊 GD、葡萄牙 BVL、**沙特 TASI**、**土耳其 XU100**、南非、以色列、
+埃及 CASE30、俄罗斯 RTSI。
+
+仍缺：爱尔兰、波兰、阿根廷、斯里兰卡、冰岛、越南、捷克、芬兰。
+
+⚠️ 元数据有质量问题：巴基斯坦条目下挂的是韩国 KOSPI 指数。采用前需逐个核对符号。
+
+### 三种方案对比
+
+| 方案 | 国家覆盖 | 成本 | 可立即开工 |
+|---|---|---|---|
+| **仅新浪**（云函数直连） | 27 | 免费、无 key | ✅ |
+| 新浪 + Twelve Data 免费 key | 约 38–40 | 免费、需注册 | 需先核对符号 |
+| 付费源（如 EODHD） | 47 | 约 $20/月 | 需订阅 |
+
+三种方案下**核心 12 国都完整**，差异全在扩展层与长尾层。
+
+> 产品评审的结论值得在此复读：长尾市场流动性低、单日跳动大，
+> 与核心市场同榜会系统性霸占榜首榜尾，**本来就不该进主榜**。
+> 因此覆盖面从 47 降到 27，对产品的实际伤害远小于数字观感。
+
+### 已建仓库
+
+`github.com/weiyhmail-sketch/global-index-rank`（公开）。
+微信侧标识已隔离在 `.gitignore` 中（`docs/LOCAL_CONFIG.md`、`project.config.json`、
+`miniprogram/config.js`）。
+
+---
+
 ## P2 云端探测结论（2026-09-20）—— 重要
 
 在云函数里实测了 11 个数据源。**这推翻了原方案的主源选择。**
