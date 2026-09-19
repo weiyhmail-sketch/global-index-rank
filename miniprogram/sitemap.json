@@ -1,0 +1,1 @@
+{ "desc": "sitemap 配置见官方文档", "rules": [{ "action": "allow", "page": "*" }] }

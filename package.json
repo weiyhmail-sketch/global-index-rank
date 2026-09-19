@@ -1,0 +1,7 @@
+{
+  "name": "index-rank-tools",
+  "private": true,
+  "version": "1.0.0",
+  "description": "本地工具链：通过小程序自动化通道调用云函数（CLI 本身没有 invoke 命令）",
+  "devDependencies": { "miniprogram-automator": "^0.12.1" }
+}

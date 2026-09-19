@@ -1,0 +1,23 @@
+# 微信侧标识：不入公开仓库
+project.config.json
+project.private.config.json
+miniprogram/config.js
+
+# 依赖与生成物
+node_modules/
+__pycache__/
+*.pyc
+
+# 原始抓取缓存（体积大且可重建）
+data/raw/
+
+# 原型生成物（1.9MB，由 build_prototype.py 从模板+数据生成）
+prototype/index.html
+
+# 本地工具配置
+.claude/
+.DS_Store
+docs/LOCAL_CONFIG.md
+
+# 生成物：由 build_snapshot.py 产出，Actions 会重新生成
+data/app_data.json
