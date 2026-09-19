@@ -1,0 +1,31 @@
+name: 探测境外数据源
+
+# Yahoo 在 runner 上同样 429（已验证）。本轮测试其他候选源在境外 IP 下的可用性。
+on:
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 出口 IP
+        run: curl -s https://api.ipify.org; echo
+      - name: stooq CSV（之前在国内机房IP撞到人机验证，境外未必触发）
+        run: |
+          for s in "%5Espx" "%5Edax" "%5Eset" "%5Eklse" "%5Epx" "%5Eomxipi"; do
+            printf "  %-12s " "$s"
+            out=$(curl -s -m 20 "https://stooq.com/q/d/l/?s=${s}&i=d" | head -3 | tail -2 | tr '\n' ' ')
+            echo "${out:0:110}"
+          done
+      - name: Yahoo 复测（确认 429 稳定）
+        run: curl -s -m 20 "https://query1.finance.yahoo.com/v8/finance/chart/%5EGSPC?range=5d&interval=1d" | head -c 120; echo
+      - name: 各数据商无 key 响应（确认可达性与注册门槛）
+        run: |
+          for u in "https://api.twelvedata.com/stocks?exchange=NASDAQ" \
+                   "https://financialmodelingprep.com/api/v3/quote/%5EGSPC" \
+                   "https://eodhd.com/api/eod/GSPC.INDX?fmt=json"; do
+            printf "  %-60s " "$(echo $u | cut -c1-58)"
+            curl -s -m 20 "$u" | head -c 90 | tr '\n' ' '; echo
+          done
+      - name: 欧洲央行 SDW（官方，无需 key）
+        run: curl -s -m 20 "https://data-api.ecb.europa.eu/service/data/EXR/D.USD.EUR.SP00.A?lastNObservations=2&format=jsondata" | head -c 150; echo
