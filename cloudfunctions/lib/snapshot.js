@@ -11,7 +11,34 @@
 // （A 股国庆 8 天、农历新年约 9 天），又能挡住数据源悄悄降级：
 // 巴基斯坦 2021-2022 是月频数据，「近3年」的起点曾回溯 17 天而无人察觉。
 // 不用「N 个交易日」作阈值——正是交易日序列本身不可信时才需要这道检查。
-const MAX_BACKTRACK_DAYS = 10;
+/**
+ * 端点回溯上限：按指数自适应，而不是一个固定的 10 天。
+ *
+ * 固定 10 天误伤得比想象中广。实测 33 个指数的相邻观测间隔：
+ *   中国台湾 13 天（农历新年休市最长）、中国四个指数各 11 天、印尼 11 天
+ *   —— 6/33 超过 10 天，而没有一个超过 14 天。
+ * 被误伤的后果不只是少一行：界面会写出「数据自 2022-08-08 起」+「近3月数据不足」，
+ * 而台湾有 3.8 年连续数据，这两句话放在一起是假的。
+ *
+ * 自适应还比固定值更严：多数指数的最大间隔只有 5-6 天，阈值取 8 就够，
+ * 比 10 更早发现「月频数据混进日频榜」这类退化。
+ * 取 p99.9 而非最大值，是为了不让历史上一次性的长期停市把阈值顶到天上去；
+ * 上下夹在 [8, 20] 之间，下限防过紧、上限防这道闸门被一份烂数据废掉。
+ *
+ * 注意：这道上限**不是**频率守卫。对月频数据，窗口起点有约 1/3 的概率
+ * 正好落在离某个月频点 10 天以内，那时它照样放行。真正的频率守卫是
+ * build-data.js 里的密度检查。别把这道上限当频率检查来调参。
+ */
+const BACKTRACK_FLOOR = 8, BACKTRACK_CEIL = 20;
+function backtrackLimit(series) {
+  if (series.length < 30) return BACKTRACK_CEIL;
+  const gaps = [];
+  for (let i = 1; i < series.length; i++)
+    gaps.push(Math.round((new Date(series[i][0] + "T00:00:00Z") - new Date(series[i - 1][0] + "T00:00:00Z")) / 86400000));
+  gaps.sort((a, b) => a - b);
+  const p999 = gaps[Math.min(gaps.length - 1, Math.floor(gaps.length * 0.999))];
+  return Math.max(BACKTRACK_FLOOR, Math.min(BACKTRACK_CEIL, p999 + 2));
+}
 
 const WINDOWS = [
   // 「今日」是事实错误的标签：各国收盘时点不同，长假后它还是跨假期的累计涨幅
@@ -82,7 +109,14 @@ function makeLevelFn(series, ccy, fxPairs) {
  * @returns { meta, snapshot, windows }
  */
 function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
-  const { endShiftDays = 0, anchors = [] } = opts;
+  const { endShiftDays = 0, anchors = [], fxStale = [] } = opts;
+  // 停更超过软阈值的货币：外币口径一律置空，让它走「仅原币」那一分区。
+  //
+  // fx.js 算出 fxStale 之后没人消费——它承诺的「诚实退回原币」在计算侧
+  // 和展示侧都没实现，只产出了一个列表。这是第四个「写了防护但防护够不着」。
+  // 用陈旧汇率照样能算出一个看起来正常的数，那才是最危险的形态：
+  // 不报错、不标注、数值量级也对，只是错的。
+  const staleCcy = new Set(fxStale.map((x) => x.ccy));
   // 空序列的货币直接剔除：留着它们会让下游每一处 at()/fxPairs[c][0] 都要判空，
   // 而 canFx 的语义本来就是「这个货币有可用汇率」。
   const fxPairs = Object.fromEntries(
@@ -105,8 +139,11 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
     }
     const asof = series[series.length - 1][0];
     const first = series[0][0];
+    const maxBack = backtrackLimit(series);
     const level = makeLevelFn(series, m.ccy, fxPairs);
-    const canFx = (m.ccy === "USD" || !!fxPairs[m.ccy]) && !!fxPairs.CNY;
+    // 本币或人民币任一停更，外币换算就不可信 —— 换算要两端汇率
+    const canFx = (m.ccy === "USD" || !!fxPairs[m.ccy]) && !!fxPairs.CNY
+      && !staleCcy.has(m.ccy) && !staleCcy.has("CNY");
 
     const prevTradingDay = series.length > 1 ? series[series.length - 2][0] : null;
     const starts = {
@@ -136,7 +173,7 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
         if (pt) {
           const back = Math.round(
             (new Date(st + "T00:00:00Z") - new Date(pt[0] + "T00:00:00Z")) / 86400000);
-          if (back > MAX_BACKTRACK_DAYS) tooFar = true;
+          if (back > maxBack) tooFar = true;
           else spans[key] = back;
         }
       }
@@ -152,6 +189,8 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       for (const cur of ["local", "usd", "cny"]) {
         // 数据起点晚于窗口起点 → 不可得，显示「—」而非用首日充数
         if (!st || st < first || tooFar) { row[key][cur] = null; continue; }
+        // 汇率停更：外币口径置空而不是拿陈旧汇率硬算
+        if (cur !== "local" && !canFx) { row[key][cur] = null; continue; }
         const a = level(st, cur), b = level(asof, cur);
         row[key][cur] = (a && b) ? Math.round((b / a - 1) * 10000) / 100 : null;
       }
@@ -186,7 +225,7 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       code: m.code, name: m.name, country: m.country, flag: m.flag,
       group: m.group, tier: m.tier, ccy: m.ccy, source: `sina-${m.src}`,
       asof, start: first, level: Math.round(series[series.length - 1][1] * 100) / 100,
-      canFx, fxFrom, fxReason, d1Span, note: m.note || null,
+      canFx, fxFrom, fxReason, d1Span, maxBack, note: m.note || null,
     });
   }
   // 每个窗口的典型天数与可比市场数。
@@ -227,9 +266,12 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
  * 返回 { code: { win: { cur: delta|null } } }，正数表示名次上升。
  */
 function buildRankDelta(indices, seriesByCode, fxRates, opts = {}) {
-  const { days = 7, anchors = [] } = opts;
-  const now = buildSnapshot(indices, seriesByCode, fxRates, { anchors });
-  const past = buildSnapshot(indices, seriesByCode, fxRates, { anchors, endShiftDays: -days });
+  // fxStale 要一起传下去，否则两次快照的参与池口径不一致：
+  // 主快照把停更货币的外币口径置空了，这里没置空，名次变化就会拿
+  // 一个「其实不参与排名」的市场去比，算出无中生有的升降。
+  const { days = 7, anchors = [], fxStale = [] } = opts;
+  const now = buildSnapshot(indices, seriesByCode, fxRates, { anchors, fxStale });
+  const past = buildSnapshot(indices, seriesByCode, fxRates, { anchors, endShiftDays: -days, fxStale });
 
   const keys = [...WINDOWS.map((w) => w[0]), ...anchors.map((a) => "anchor:" + a.date)];
   const rankOf = (snap, win, cur) => {
@@ -322,6 +364,7 @@ function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
     const raw = seriesByCode[m.code];
     if (!raw) continue;
     const series = toPairs(raw);
+    const maxBack = backtrackLimit(series);
     const level = makeLevelFn(series, m.ccy, fxPairs);
     const first = series[0][0];
     const row = { local: [], usd: [], cny: [] };

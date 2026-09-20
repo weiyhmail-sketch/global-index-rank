@@ -165,6 +165,36 @@ require("../miniprogram/pages/detail/detail.js");
         `令牌是 ${inst.rangeToken} —— 加载失败后每次切区间都会被当成过期请求丢弃`);
   check(!threw, `onRange 抛出未捕获异常: ${threw}`);
 
+
+  // 快照与走势图来自不同构建时，必须说出来
+  //
+  // 取数是对冲的：主源 raw 慢了 600ms 就并发点燃 jsDelivr，而 jsDelivr 会缓存
+  // 分支→commit 的解析结果，可能回上一版。于是标题的涨幅(快照,今天)和
+  // 曲线(chart,昨天)拼在一起。不重取——重取要再走一次云函数往返，
+  // 冷启动直接撞 3 秒——但必须如实标注。
+  console.log("\n快照与走势图不同源时:");
+  const sameCall = global.wx.cloud.callFunction;
+  global.wx.cloud.callFunction = async (args) => {
+    const r = await sameCall(args);
+    if (args.name === "get-chart") r.result.generated = "2026-09-19T22:00:00.000Z";
+    else if (r.result) r.result.generated = "2026-09-20T22:00:00.000Z";
+    return r;
+  };
+  inst.snap = undefined; inst.m = undefined; inst.chart = undefined; inst.chartCache = {};
+  inst.onLoad({ code: "KS11", cur: "cny" });
+  await new Promise((r) => setTimeout(r, 500));
+  console.log(`  采样注：「${inst.data.sampleNote}」`);
+  check(/上一版构建/.test(inst.data.sampleNote || ""), "两份数据来自不同构建，界面却只字不提");
+  check(/09-19/.test(inst.data.sampleNote || ""), "没说清走势数据是哪一版");
+
+  // 同源时不该平白冒出这句话
+  global.wx.cloud.callFunction = sameCall;
+  inst.snap = undefined; inst.m = undefined; inst.chart = undefined; inst.chartCache = {};
+  inst.onLoad({ code: "KS11", cur: "cny" });
+  await new Promise((r) => setTimeout(r, 500));
+  check(!/上一版构建/.test(inst.data.sampleNote || ""), `同源时不该提示不同源：「${inst.data.sampleNote}」`);
+  console.log(`  同源时：「${inst.data.sampleNote || "(无提示)"}」`);
+
   console.log();
   if (fail.length) { console.log("❌ 问题:"); fail.forEach((f) => console.log("  " + f)); process.exit(1); }
   console.log("✅ 详情页逻辑全部通过");

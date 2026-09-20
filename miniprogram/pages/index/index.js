@@ -71,7 +71,15 @@ Page({
         winIdx: ytd < 0 ? 0 : ytd,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
         // 构建侧算了新鲜度却没人读，等于白算
-        staleNote: d.stale || "",
+        staleNote: [
+          d.stale || "",
+          // 汇率停更同理：fx.js 算出 fxStale、传了三层，客户端零引用。
+          // 现在计算侧会把停更货币的外币口径置空(走「仅原币」分区)，
+          // 这里把原因说出来，否则用户只看到某些市场莫名其妙掉出了排名。
+          (d.fxStale && d.fxStale.length)
+            ? `${d.fxStale.map((x) => x.ccy).join("、")} 汇率已 ${Math.max(...d.fxStale.map((x) => x.lag))} 天未更新，相关市场本轮只给原币口径`
+            : "",
+        ].filter(Boolean).join(" · "),
         loading: false,
       });
       this.render();
@@ -257,7 +265,8 @@ Page({
         //            超过回溯上限）。这时再写「数据自 2022-08-08 起」+「近3月数据不足」
         //            就是自相矛盾——实测这两句话真的同时出现在屏幕上。
         naNote: r.why === "gap" ? "起点落在休市期内，无可比收盘价"
-              : r.why === "short" ? `数据自 ${r.m.start} 起`
+              // 被频率校验截断过的，要说清是我们剔除的，而不是源里就没有
+              : r.why === "short" ? (r.m.truncNote || `数据自 ${r.m.start} 起`)
               : "",
         asofTag: (r.m.asof !== this.baseAsof ? " · 截至" + r.m.asof.slice(5) : "")
           // 长假后「最近交易日」是跨假期的累计涨幅，如实标注

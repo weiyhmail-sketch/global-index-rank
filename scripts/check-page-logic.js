@@ -155,6 +155,9 @@ require("../miniprogram/pages/index/index.js");
   // 回溯上限会让「明明有数据」的区间显示「—」，说明页不提的话用户无从理解
   if (!/回溯|长假|休市/.test(about))
     docFail.push("代码有起点回溯上限，说明页没有任何解释");
+  // 频率校验会丢弃源里存在的数据，不说的话 meta.start 就是一句关于数据源的假话
+  if (!/剔除|密度|月频/.test(about))
+    docFail.push("构建会剔除月频数据，说明页没说");
   docFail.forEach((f) => { fail.push(f); console.log("  ✗ " + f); });
   if (!docFail.length) console.log("  说明页与代码一致 ✅");
 

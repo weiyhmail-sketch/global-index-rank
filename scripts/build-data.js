@@ -66,6 +66,7 @@ async function pool(items, limit, fn) {
   // 截断到日频开始那天，让更早的窗口显示「—」。
   const SPARSE_THRESHOLD = 180;
   const freqNotes = [];
+  const truncated = {};   // code -> { srcStart, cut, dropped }，写进 meta 供界面说明
   for (const m of INDICES) {
     const raw = series[m.code];
     if (!raw) continue;
@@ -80,13 +81,40 @@ async function pool(items, limit, fn) {
       if (byYear[years[i]] < SPARSE_THRESHOLD) { cutYear = years[i]; break; }
     }
     if (!cutYear) continue;
-    // 截到该稀疏年之后第一个观测密度正常的日期
+    // 截到密度真正转折的那一天，而不是下一个日历年的年初。
+    //
+    // 原来取 `d.slice(0,4) > cutYear` 的第一个观测，注释却写着「观测密度正常的
+    // 日期」—— 两者不是一回事。巴基斯坦源里日频其实从 2023-11-16 就开始了，
+    // 按日历年切会把 11-16 到 12-29 那约 30 个完全正常的日频点一起丢掉，
+    // 代价是「近3年」要晚一个半月才恢复。
     const after = ks.filter((d) => d.slice(0, 4) > cutYear);
     if (!after.length) continue;
-    const cut = after[0];
+    let cut = after[0];
+    // 在稀疏年内部找日频真正开始的那一点。
+    //
+    // 判据用「窗口内每一个间隔都 ≤5 天」，不用平均间隔：平均会把转折点前
+    // 那个大缺口一起吞进来。巴基斯坦的序列是 … 2023-11-01, 2023-11-16,
+    // 2023-11-17, 2023-11-20 …，11-01 是最后一个月频点，它到 11-16 隔了 15 天。
+    // 按平均判会从 11-01 起算（20 个点跨 30 天，均值 1.5 天，看着很密），
+    // 于是序列开头挂着一个 15 天的缺口 —— 而回溯上限正是按观测间隔自适应的，
+    // 这个缺口会把它撑大，等于自己给自己松了闸。
+    // 5 天的容忍度覆盖周末加一个假日。
+    const inCut = ks.filter((d) => d.slice(0, 4) === cutYear);
+    const W = 20, MAX_OK_GAP = 5;
+    const gapAt = (a, b) => (new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000;
+    for (let i = 0; i + W < inCut.length; i++) {
+      let dense = true;
+      for (let k = i; k < i + W; k++) if (gapAt(inCut[k], inCut[k + 1]) > MAX_OK_GAP) { dense = false; break; }
+      if (dense) { cut = inCut[i]; break; }
+    }
     const dropped = ks.filter((d) => d < cut).length;
+    const srcStart = ks[0];
     series[m.code] = Object.fromEntries(ks.filter((d) => d >= cut).map((d) => [d, raw[d]]));
-    freqNotes.push(`${m.country} ${m.name}: ${cutYear} 年及以前为月频（每年 ${byYear[cutYear]} 条），已截断，丢弃 ${dropped} 条，日频自 ${cut} 起`);
+    // 截断这件事必须记下来并展示。不记的话 meta.start 会变成一句关于数据源的
+    // 假话：界面写「数据自 2024-01-01 起」，而源里其实有 2020 年起的数据，
+    // 是我们丢掉的。用户无从得知，也无从判断这个判断合不合理。
+    truncated[m.code] = { srcStart, cut, dropped, cutYear, perYear: byYear[cutYear] };
+    freqNotes.push(`${m.country} ${m.name}: ${cutYear} 年及以前为月频（每年 ${byYear[cutYear]} 条），已截断，丢弃 ${dropped} 条（源自 ${srcStart}），日频自 ${cut} 起`);
   }
   if (freqNotes.length) {
     console.log("\n频率校验：");
@@ -94,15 +122,29 @@ async function pool(items, limit, fn) {
   }
 
   const got = INDICES.filter((m) => series[m.code]);
-  const { meta, snapshot, windows, anchorMeta } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
-  const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS });
+  const { meta, snapshot, windows, anchorMeta } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS, fxStale: fx.fxStale });
+  // 把频率截断挂到 meta 上。meta.start 只说「我们手里的数据从哪天起」，
+  // 不说「源里只有这么多」—— 差别要让用户看得见，否则那就是一句假话。
+  for (const m of meta) {
+    const t = truncated[m.code];
+    if (t) { m.srcStart = t.srcStart; m.truncNote = `${t.cutYear} 年及以前源数据为月频，已剔除；日频自 ${t.cut} 起`; }
+  }
+  const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS, fxStale: fx.fxStale });
   const monthly = buildMonthly(got, series, fx.rates, { years: 6 });
   const yearly = buildYearly(monthly, { years: 6 });
   const asofs = meta.map((m) => m.asof).sort();
 
+  // 一次构建一个时间戳，所有产物共用。
+  //
+  // 原先每个产物各调一次 new Date()，毫秒都不一样，跨产物比对永远不相等——
+  // 而客户端正需要比对：对冲取数之后，快照可能来自 raw(今天)、
+  // 走势图可能来自 jsDelivr(上一版)，于是详情页标题的涨幅和曲线来自不同构建。
+  // 统一成一个 id，客户端才能发现并如实说明。
+  const GENERATED = new Date().toISOString();
+
   fs.writeFileSync(fxPath, JSON.stringify(fx));
   fs.writeFileSync(path.join(OUT, "snapshot.json"), JSON.stringify({
-    generated: new Date().toISOString(),
+    generated: GENERATED,
     dataAsof: asofs[asofs.length - 1] || null,
     countries: new Set(meta.map((m) => m.country)).size,
     windows, anchors: ANCHORS.map((a) => {
@@ -116,12 +158,12 @@ async function pool(items, limit, fn) {
   // monthly 占快照六成体积，而首屏用不到它（只有自定义区间需要），
   // 单独成文件以保证每日 ingest 轻快。
   fs.writeFileSync(path.join(OUT, "monthly.json"), JSON.stringify({
-    generated: new Date().toISOString(), dataAsof: asofs[asofs.length - 1] || null, ...monthly,
+    generated: GENERATED, dataAsof: asofs[asofs.length - 1] || null, ...monthly,
   }));
   // 整包 series.json 保留（便于本地调试），但云函数不用它：
   // gzip 后仍有 329 KB、实测 2.57 秒，离 3 秒超时太近。
   fs.writeFileSync(path.join(OUT, "series.json"), JSON.stringify({
-    generated: new Date().toISOString(),
+    generated: GENERATED,
     data: Object.fromEntries(Object.entries(series).map(([c, d]) =>
       [c, Object.entries(d).sort((a, b) => (a[0] < b[0] ? -1 : 1))])),
   }));
@@ -132,7 +174,7 @@ async function pool(items, limit, fn) {
   fs.mkdirSync(seriesDir, { recursive: true });
   for (const [code, d] of Object.entries(series)) {
     const pairs = Object.entries(d).sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    fs.writeFileSync(path.join(seriesDir, code + ".json"), JSON.stringify({ code, n: pairs.length, data: pairs }));
+    fs.writeFileSync(path.join(seriesDir, code + ".json"), JSON.stringify({ generated: GENERATED, code, n: pairs.length, data: pairs }));
   }
   // 走势图分片：近 5 年 × 三种口径，供详情页使用
   const chartDir = path.join(OUT, "chart");
@@ -141,12 +183,12 @@ async function pool(items, limit, fn) {
   for (const m of got) {
     const c = buildChart(m, series[m.code], fxPairs, { years: 5 });
     fs.writeFileSync(path.join(chartDir, m.code + ".json"),
-      JSON.stringify({ code: m.code, ccy: m.ccy, n: c.dates.length, ...c }));
+      JSON.stringify({ generated: GENERATED, code: m.code, ccy: m.ccy, n: c.dates.length, ...c }));
   }
 
   // 索引文件，供客户端/云函数知道有哪些可取
   fs.writeFileSync(path.join(seriesDir, "_index.json"), JSON.stringify({
-    generated: new Date().toISOString(),
+    generated: GENERATED,
     codes: Object.keys(series).sort(),
   }));
 

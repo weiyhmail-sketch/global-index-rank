@@ -66,7 +66,8 @@ Page({
         loading: false,
         flag: m.flag, country: m.country, name: m.name,
         level: m.level.toLocaleString(), asof: m.asof,
-        metaLine: `本币 ${m.ccy} · 数据 ${m.start} 起 · 源 ${m.source}`,
+        metaLine: `本币 ${m.ccy} · 数据 ${m.start} 起 · 源 ${m.source}`
+          + (m.truncNote ? `\n${m.truncNote}` : ""),
         note: m.fxFrom
           ? (m.fxReason === "gap"
               ? `${m.ccy} 自 ${m.fxFrom} 起才有公开汇率，更早区间只有原币口径。`
@@ -203,8 +204,15 @@ Page({
           stat = `${pts[0][0]} → ${pts[pts.length - 1][0]} · ${fmt(snapV)}`;
           this.draw(pts, snapV >= 0);
         }
-        sampleNote = (c.dailyFrom && pts[0][0] < c.dailyFrom)
-          ? `${c.dailyFrom} 之前为每周采样` : "";
+        const notes = [];
+        if (c.dailyFrom && pts[0][0] < c.dailyFrom) notes.push(`${c.dailyFrom} 之前为每周采样`);
+        // 标题的涨幅读快照、曲线读 chart，两者由两次独立的云函数调用取回，
+        // 而取数是对冲的：快照可能来自 raw(今天)，曲线可能来自 jsDelivr 上
+        // 一份没刷新的缓存。不一致不重取（要再走一次往返，冷启动直接撞 3 秒），
+        // 但必须说出来，否则用户看到的是两个日期的真相拼在一起。
+        if (c.generated && s.generated && c.generated !== s.generated)
+          notes.push(`走势数据来自上一版构建（${c.generated.slice(5, 10)}）`);
+        sampleNote = notes.join(" · ");
       } else {
         stat = "该区间数据不足";
         this.clear();

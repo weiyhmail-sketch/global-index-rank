@@ -31,7 +31,11 @@ exports.main = async (event = {}) => {
         if (cny) cny = cny.slice(i);
       }
     }
+    // generated 原样回传：对冲取数之后，快照可能来自 raw(今天)、
+    // 这份走势图可能来自 jsDelivr(上一版)。客户端比一下就知道两者是否同源。
+    // 只检测不重取 —— 重取要再走一次云函数往返，冷启动时直接撞 3 秒。
     return { ok: true, ms, bytes, code, ccy: d.ccy, n: dates.length,
+             generated: d.generated || null,
              dailyFrom: d.dailyFrom, truncated, dates, local, usd, cny };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };

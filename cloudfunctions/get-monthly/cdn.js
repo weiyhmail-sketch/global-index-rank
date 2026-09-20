@@ -26,7 +26,7 @@ const REPO = "weiyhmail-sketch/global-index-rank";
  */
 const HARD_LIMIT = 3000;
 let warm = false;
-const budgets = () => (warm ? { BUDGET: 2500, HEDGE_AT: 900 } : { BUDGET: 1400, HEDGE_AT: 500 });
+const budgets = () => (warm ? { BUDGET: 2500, HEDGE_AT: 600 } : { BUDGET: 1400, HEDGE_AT: 350 });
 
 /**
  * 源顺序：raw.githubusercontent 优先，jsDelivr 兜底。
@@ -86,6 +86,20 @@ function get(url, timeout, depth = 0) {
  *
  * 仍然偏向主源：备源晚 HEDGE_AT 起跑，主源只要不是明显更慢就会先到。
  * 这点偏向是必要的——jsDelivr 可能回上一版数据(见上方 sources 注释)。
+ *
+ * HEDGE_AT 的依据（cloudfunctions/probe-net 实测，14 个有效样本）：
+ *   raw 成功时 ttfb 782 / 960 / 1124ms（最小/中位/最大）——原先取 900 的理由是
+ *     「刚好在观测上界之上，主源健康时几乎不点火」，那个观测值(0.43–0.80s)
+ *     已经不成立了，900 其实压在中位数底下。
+ *   jsDelivr 失败时是 15–25ms 的 ECONNREFUSED（快速失败，点火几乎不花钱）；
+ *     成功时要 1509–2590ms，比 raw 慢——所以早点火不会让它轻易抢赢健康的主源。
+ *   取 600：低于 raw 最快的 ttfb(782)，不会抢在健康主源前面；
+ *     又比 900 多给备源 300ms，而备源恰恰最缺这 300ms。
+ *
+ * 一个被实测否掉的方案：审查建议「第一条对冲腿打到同一个 raw，
+ * 因为失败是连接级挂起而不是 raw 不可用」。实测两条 raw 连接
+ * **10/14 次同时失败**，只有 3/14 是一成一败——同源第二条连接救不回来。
+ * 反倒是 jsDelivr 成功的那 3 次里 raw 全都失败了，它确实补得上。
  */
 /** 取第一个成功的；全部失败才失败。Promise.race 遇到第一个 reject 就结束，不能用。 */
 function firstSuccess(ps) {

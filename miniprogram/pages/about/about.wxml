@@ -39,6 +39,7 @@
   <view class="sec">
     <view class="h">数据来源</view>
     <view class="p">新浪财经公开行情接口（环球指数、A 股、美股、港股四条线）；汇率来自欧洲央行（Frankfurter）与 currency-api。每日收盘后更新一次。</view>
+    <view class="p">抓到不等于抓对：个别市场的早期数据在源里是每月一条，混进日频榜单会让区间起点偏上十几天。构建时会检查观测密度，判为非日频的年份整段剔除，相关行会注明「已剔除」——这是我们的判断，不是源的限制，源里那段数据是存在的。</view>
   </view>
   <view class="sec disc">
     <view class="h">免责声明</view>
