@@ -81,9 +81,7 @@ require("../miniprogram/pages/detail/detail.js");
   for (let ci = 0; ci < 3; ci++) {
     inst.setData({ curIdx: ci });
     for (let ri = 0; ri < 5; ri++) {
-      inst.setData({ rangeIdx: ri });
-      await inst.loadChart();
-      inst.render();
+      await inst.onRange({ detail: { value: ri } });
       const d2 = inst.data;
       const label = d2.rangeOptions[ri];
       const grid = (d2.wins.find((w) => w.label === label) || {}).pct;
@@ -100,6 +98,42 @@ require("../miniprogram/pages/detail/detail.js");
   }
   check(mismatch === 0, `图表与格子有 ${mismatch} 处不一致`);
   console.log(mismatch === 0 ? "  15 个组合全部一致 ✅" : "");
+
+
+  // 快速连点区间：先发的请求后返回时，不能把旧曲线配上新窗口的数值
+  console.log("\n快速切换区间（旧请求后返回）:");
+  const realCall = global.wx.cloud.callFunction;
+  const delays = {};                      // from → 该请求人为延迟的毫秒数
+  global.wx.cloud.callFunction = async (args) => {
+    const d = delays[args.data && args.data.from] || 0;
+    if (d) await new Promise((r) => setTimeout(r, d));
+    return realCall(args);
+  };
+  inst.chartCache = {};                   // 清缓存，逼出真实请求
+  inst.setData({ curIdx: 0 });
+  const asof = snapshot.meta.find((m) => m.code === "KS11").asof;
+  const mm = (n) => { const dt = new Date(asof + "T00:00:00Z"); const day = dt.getUTCDate();
+    dt.setUTCDate(1); dt.setUTCMonth(dt.getUTCMonth() - n);
+    const last = new Date(Date.UTC(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0)).getUTCDate();
+    dt.setUTCDate(Math.min(day, last)); return dt.toISOString().slice(0, 10); };
+  delays[mm(3)] = 300;                    // 「近3月」慢，会在「近3年」之后才返回
+  const slow = inst.onRange({ detail: { value: 1 } });   // 近3月
+  const fast = inst.onRange({ detail: { value: 3 } });   // 近3年
+  await Promise.all([slow, fast]);
+  await new Promise((r) => setTimeout(r, 500));
+  const finalLabel = inst.data.rangeOptions[inst.data.rangeIdx];
+  const finalGrid = (inst.data.wins.find((w) => w.label === finalLabel) || {}).pct;
+  const fm = inst.data.chartStat.match(/([+-][\d.]+%)\s*$/);
+  console.log(`  最终区间 ${finalLabel} · 标题「${inst.data.chartStat}」· 格子 ${finalGrid}`);
+  check(finalLabel === "近3年", `连点后停在 ${finalLabel}，应为近3年`);
+  check(!fm || fm[1] === finalGrid, `连点后图表 ${fm && fm[1]} 与格子 ${finalGrid} 不符`);
+  const span = inst.data.chartStat.match(/^(\d{4}-\d\d-\d\d) → (\d{4}-\d\d-\d\d)/);
+  if (span) {
+    const days = (new Date(span[2]) - new Date(span[1])) / 86400000;
+    console.log(`  标题跨度 ${Math.round(days)} 天`);
+    check(days > 900, `标题跨度只有 ${Math.round(days)} 天，曲线仍是旧区间的`);
+  }
+  global.wx.cloud.callFunction = realCall;
 
   console.log();
   if (fail.length) { console.log("❌ 问题:"); fail.forEach((f) => console.log("  " + f)); process.exit(1); }

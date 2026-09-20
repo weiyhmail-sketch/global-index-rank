@@ -10,6 +10,11 @@ const zlib = require("zlib");
 
 const REPO = "weiyhmail-sketch/global-index-rank";
 
+// 函数总超时 3 秒且不可调，留 300ms 给冷启动与 JSON.parse。
+const BUDGET = 2500;
+// 主源超过这个时间还没回来就并发点燃备源。
+const HEDGE_AT = 900;
+
 /**
  * 源顺序：raw.githubusercontent 优先，jsDelivr 兜底。
  *
@@ -23,7 +28,7 @@ const sources = (f) => [
   `https://cdn.jsdelivr.net/gh/${REPO}@data/${f}`,
 ];
 
-function get(url, timeout = 2400, depth = 0) {
+function get(url, timeout = BUDGET, depth = 0) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { "User-Agent": "index-rank", "Accept-Encoding": "gzip" }, timeout,
@@ -48,17 +53,76 @@ function get(url, timeout = 2400, depth = 0) {
   });
 }
 
-/** 依次尝试 jsDelivr 与 raw.githubusercontent，返回 { data, url, ms, bytes }。 */
+/**
+ * 取数据：主源优先，但不为主源干等——谁先成功用谁。
+ *
+ * 为什么不能串行：免费版函数 3 秒被杀，两个源串行各给 2.4 秒共 4.8 秒。
+ * 主源一旦挂起(而不是快速失败)，函数在备源还没发出去时就已经死了。
+ * 实测 20 次调用只 5 次成功，其中 11 次就是这种「写了兜底却够不着」的超时。
+ *
+ * 三条触发线：
+ *   主源失败  → 立刻点燃备源，不等 HEDGE_AT
+ *   主源超时未回 → HEDGE_AT 时并发点燃备源，两条腿一起跑
+ *   主源正常   → 备源一次请求都不发
+ *
+ * 仍然偏向主源：备源晚 HEDGE_AT 起跑，主源只要不是明显更慢就会先到。
+ * 这点偏向是必要的——jsDelivr 可能回上一版数据(见上方 sources 注释)。
+ */
+/** 取第一个成功的；全部失败才失败。Promise.race 遇到第一个 reject 就结束，不能用。 */
+function firstSuccess(ps) {
+  return new Promise((resolve, reject) => {
+    let left = ps.length;
+    ps.forEach((p) => p.then(resolve, (e) => --left === 0 && reject(e)));
+  });
+}
+
 async function fetchJSON(file) {
   const t0 = Date.now();
-  let last;
-  for (const url of sources(file)) {
-    try {
-      const body = await get(url);
-      return { data: JSON.parse(body), url, ms: Date.now() - t0, bytes: Buffer.byteLength(body) };
-    } catch (e) { last = e; }
+  const [primary, backup] = sources(file);
+  const errs = [];
+  const left = () => BUDGET - (Date.now() - t0);
+
+  const attempt = (url) =>
+    get(url, left()).then(
+      (body) => ({ url, body }),
+      (e) => {
+        errs.push(`${url.split("/")[2]} ${e.message}`);
+        throw e;
+      }
+    );
+
+  // 备源的位置先占住再说：它可能由超时点燃，也可能由主源失败提前点燃，
+  // 而竞速要在它起跑之前就把这个位置排进去，否则提前点燃的备源赢了也没人接。
+  let slotDone, slotFail;
+  const backupSlot = new Promise((res, rej) => ((slotDone = res), (slotFail = rej)));
+  backupSlot.catch(() => {}); // 主源赢时这个位置永不兑现，先挂一个空 catch
+
+  let started = false, settled = false;
+  const startBackup = () => {
+    if (started || settled) return;
+    started = true;
+    attempt(backup).then(slotDone, slotFail);
+  };
+
+  const pPrimary = attempt(primary);
+  pPrimary.catch(startBackup); // 主源快速失败就立刻起跑，不必等满 HEDGE_AT
+  const timer = setTimeout(startBackup, HEDGE_AT);
+
+  let won;
+  try {
+    won = await firstSuccess([pPrimary, backupSlot]);
+  } catch (e) {
+    throw new Error(`各源均取不到 ${file}：${errs.join(" / ")}`);
+  } finally {
+    settled = true;
+    clearTimeout(timer); // 主源赢了就别再多发一次请求
   }
-  throw new Error(`各源均取不到 ${file}：${last && last.message}`);
+  return {
+    data: JSON.parse(won.body),
+    url: won.url,
+    ms: Date.now() - t0,
+    bytes: Buffer.byteLength(won.body),
+  };
 }
 
 /** 构建时间是否在 36 小时内（每日构建 + 容忍一天失败）。 */

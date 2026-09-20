@@ -69,7 +69,8 @@ Page({
               : `汇率数据自 ${m.fxFrom} 起，此前只有原币口径。`)
           : (m.note || ""),
       });
-      await this.loadChart();
+      this.rangeToken = 0;
+      this.chart = await this.loadChart(RANGES[this.data.rangeIdx]);
       this.render();
     } catch (e) {
       this.setData({ loading: false, error: e.message || String(e) });
@@ -83,16 +84,20 @@ Page({
    * （实测 SPX 全量 timeout、带 from 的 181 点 2.2 秒通过）。
    * 按区间取既不超时，也不损失任何数据精度。取过的区间缓存起来。
    */
-  async loadChart() {
-    const r = RANGES[this.data.rangeIdx];
-    if (this.chartCache[r.key]) { this.chart = this.chartCache[r.key]; return; }
+  /**
+   * 取某个区间的曲线并返回它——注意是返回，不是直接写 this.chart。
+   * 由调用方在确认这次请求没被更晚的切换取代之后再落盘，
+   * 否则先发后到的旧请求会覆盖新曲线。
+   */
+  async loadChart(r) {
+    if (this.chartCache[r.key]) return this.chartCache[r.key];
     this.setData({ chartLoading: true });
     try {
       const from = minusMonths(this.m.asof, r.months);
       const c = await call("get-chart", { code: this.code, from });
       if (!c || !c.ok) throw new Error((c && c.error) || "走势数据获取失败");
       this.chartCache[r.key] = c;
-      this.chart = c;
+      return c;
     } finally {
       this.setData({ chartLoading: false });
     }
@@ -105,9 +110,18 @@ Page({
     // 新标签会挂着旧区间的曲线，之后任何一次 onCur 都会把这个错配渲染出来。
     const prev = this.data.rangeIdx;
     const next = +e.detail.value;
+    // 令牌：连点几下区间时，先发的请求可能后返回。render() 读的是渲染那一刻的
+    // rangeIdx，所以一个过期请求会把旧曲线配上新窗口的快照数值——正是
+    // 「图表与格子不同源」换条路回来。被取代的请求到这里就地丢弃。
+    const token = ++this.rangeToken;
     this.setData({ rangeIdx: next });
-    try { await this.loadChart(); this.render(); }
-    catch (err) {
+    try {
+      const c = await this.loadChart(RANGES[next]);
+      if (token !== this.rangeToken) return;
+      this.chart = c;
+      this.render();
+    } catch (err) {
+      if (token !== this.rangeToken) return;
       this.setData({ rangeIdx: prev, chartStat: "走势数据获取失败" });
       this.render();
     }
