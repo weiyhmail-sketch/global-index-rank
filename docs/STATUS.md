@@ -63,6 +63,33 @@ python3 scripts/build_snapshot.py && python3 scripts/build_prototype.py
 
 ---
 
+## 更正：东方财富拦的是 TLS 指纹，不是机房 IP（2026-09-20）
+
+此前文档多处写「东财对机房/境外 IP 拒连」，**这个诊断是错的**。逐项实测：
+
+| 客户端 | TLS 实现 | 结果 |
+|---|---|---|
+| Chrome（同一台机器、同一网络） | BoringSSL | ✅ 完整返回泰国 SET 全年日线 |
+| curl 8.7.1 | SecureTransport / LibreSSL | ❌ ECONNRESET |
+| **Node https 模块** | OpenSSL | ❌ ECONNRESET |
+| 微信云函数（Node） | OpenSSL | ❌ ECONNRESET |
+
+排除过的变量：请求头（裸请求 / UA / UA+Referer / 全套 Chrome 头均失败）、
+HTTP 版本（--http1.1 与 --http2 均失败）、URL 形式（带/不带 ut 均失败）、
+出口 IP（经代理的 45.76.215.254 与直连的家宽 36.36.210.240 均失败）。
+
+> 顺带确认代理的规则模式工作正常：国内服务看到 36.36.210.240（广东深圳天威视讯），
+> 境外服务看到 45.76.215.254。之前怀疑规则没生效也是错的。
+
+**结论**：东财按 TLS 指纹拦截非浏览器客户端。绕过它需要伪装浏览器指纹
+（curl-impersonate 一类），属于规避 bot 检测，本项目不采用。
+**东财对程序化取数不可用**，与部署在哪、用什么 IP 无关。
+
+这也解释了为什么新浪、腾讯、Frankfurter 等源在云函数里都正常——
+它们没有这类检测。
+
+---
+
 ## P4：逐年涨幅 + 数据源顺序修正（2026-09-20）
 
 ### 按产品评审做减法
