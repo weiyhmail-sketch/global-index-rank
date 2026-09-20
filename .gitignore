@@ -21,3 +21,4 @@ docs/LOCAL_CONFIG.md
 
 # 生成物：由 build_snapshot.py 产出，Actions 会重新生成
 data/app_data.json
+dist/

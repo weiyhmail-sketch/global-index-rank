@@ -1,0 +1,62 @@
+name: 每日构建指数数据
+
+# 云开发免费版云函数超时固定 3 秒且不可调，跑不完 33 个指数，
+# 因此重活放在这里；云函数只负责把产物取回写库。
+# 新浪四条线在 Actions 的 Azure 出口 IP 均可达（已实测）。
+
+on:
+  schedule:
+    # UTC 22:00 ≈ 北京时间次日 06:00，此时全球主要市场均已收盘
+    - cron: "0 22 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: 取回上一轮汇率（增量用）
+        run: |
+          mkdir -p dist
+          # 全量回补汇率要 ~30 秒、900 次 CDN 请求；有上一轮就只补增量。
+          # 取不到也无妨，build-data.js 会自动退回全量。
+          curl -sf -m 30 -o dist/fx.json \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/fx.json" \
+            && echo "已取回上一轮汇率 ($(wc -c < dist/fx.json) 字节)" \
+            || echo "未取到上一轮汇率，本次将全量回补"
+
+      - name: 构建数据
+        run: node scripts/build-data.js
+
+      - name: 发布到 data 分支
+        run: |
+          cd dist
+          # 孤儿分支 + 强推：只保留一个提交，避免每天 1MB 撑爆仓库历史
+          git init -q
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -qb data
+          git add -A
+          git commit -qm "数据更新 $(date -u +%Y-%m-%dT%H:%MZ)"
+          git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" data
+          echo "已发布到 data 分支"
+
+      - name: 摘要
+        run: |
+          node -e '
+            const s = require("./dist/snapshot.json");
+            const core = s.meta.filter(m => m.tier === "core")
+              .map(m => ({ m, v: s.snapshot[m.code].ytd.cny }))
+              .filter(r => r.v !== null).sort((a, b) => b.v - a.v);
+            console.log(`指数 ${s.meta.length} / 国家 ${s.countries} / 数据截至 ${s.dataAsof}`);
+            console.log("核心12国 · 今年以来 · 人民币口径：");
+            core.forEach((r, i) => console.log(`  ${String(i+1).padStart(2)} ${r.m.flag} ${r.m.country} ${(r.v>=0?"+":"")+r.v.toFixed(2)}%`));
+          ' >> $GITHUB_STEP_SUMMARY
