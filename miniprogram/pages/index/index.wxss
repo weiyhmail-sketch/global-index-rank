@@ -13,9 +13,14 @@ page { background: #f6f7f9; }
   border-bottom: 1rpx solid #e6e8ec;
   display: flex; gap: 12rpx; overflow-x: auto; white-space: nowrap;
 }
+/* flex 项默认 flex-shrink:1，宽度不够时会被压得比文字还窄，
+   而 .sel 是 nowrap，文字就溢出到隔壁筛选器上，看起来像乱码（真机实拍过）。
+   上面的 overflow-x:auto 本意是横向滚动，但项目会缩就永远滚不起来。
+   两件事必须一起做：不许缩 + 可滚动。 */
+.bar .pk { flex: 0 0 auto; }
 .sel {
   display: inline-flex; align-items: center; gap: 6rpx;
-  padding: 10rpx 20rpx; border-radius: 16rpx;
+  padding: 10rpx 16rpx; border-radius: 16rpx;
   background: #eef0f3; border: 1rpx solid #e6e8ec;
   font-size: 25rpx; color: #14161a; white-space: nowrap;
 }

@@ -8,16 +8,16 @@
 
   <!-- 吸顶筛选：原型上四行 chip 占首屏 37%，压成单行后降到 6% -->
   <view class="bar">
-    <picker mode="selector" range="{{winOptions}}" value="{{winIdx}}" bindchange="onWin">
-      <view class="sel">{{winOptions[winIdx]}}<text class="caret">▾</text></view>
+    <picker class="pk" mode="selector" range="{{winOptions}}" value="{{winIdx}}" bindchange="onWin">
+      <view class="sel">{{winChip}}<text class="caret">▾</text></view>
     </picker>
-    <picker mode="selector" range="{{curOptions}}" value="{{curIdx}}" bindchange="onCur">
+    <picker class="pk" mode="selector" range="{{curOptions}}" value="{{curIdx}}" bindchange="onCur">
       <view class="sel">{{curOptions[curIdx]}}<text class="caret">▾</text></view>
     </picker>
-    <picker mode="selector" range="{{tierOptions}}" value="{{tierIdx}}" bindchange="onTier">
+    <picker class="pk" mode="selector" range="{{tierOptions}}" value="{{tierIdx}}" bindchange="onTier">
       <view class="sel">{{tierOptions[tierIdx]}}<text class="caret">▾</text></view>
     </picker>
-    <picker mode="selector" range="{{grpOptions}}" value="{{grpIdx}}" bindchange="onGrp">
+    <picker class="pk" mode="selector" range="{{grpOptions}}" value="{{grpIdx}}" bindchange="onGrp">
       <view class="sel">{{grpOptions[grpIdx]}}<text class="caret">▾</text></view>
     </picker>
   </view>
@@ -26,11 +26,11 @@
   <view wx:if="{{isCustom}}" class="card months">
     <view wx:if="{{monthlyLoading}}" class="hint">加载月度数据…</view>
     <block wx:else>
-      <picker mode="selector" range="{{m0Options}}" value="{{m0Idx}}" bindchange="onM0">
+      <picker class="pk" mode="selector" range="{{m0Options}}" value="{{m0Idx}}" bindchange="onM0">
         <view class="msel">{{monthOptions[m0Idx]}} 月末</view>
       </picker>
       <text class="marrow">→</text>
-      <picker mode="selector" range="{{m1Options}}" value="{{m1Sel}}" bindchange="onM1">
+      <picker class="pk" mode="selector" range="{{m1Options}}" value="{{m1Sel}}" bindchange="onM1">
         <view class="msel">{{monthOptions[m1Idx]}}</view>
       </picker>
       <view class="mnote">取该月末或之前最近一个交易日的真实收盘价</view>

@@ -30,7 +30,7 @@ Page({
     winOptions: [], curOptions: CURS.map((c) => c.label),
     tierOptions: TIERS.map((t) => t.label), grpOptions: [],
     // 展示数据
-    sub: "", staleNote: "", ledeHead: "", rankedCount: 0, fbRows: [], naRows: [], top: null, bottom: null, stats: "", moves: [],
+    winChip: "", sub: "", staleNote: "", ledeHead: "", rankedCount: 0, fbRows: [], naRows: [], top: null, bottom: null, stats: "", moves: [],
     rows: [], naCount: 0, expanded: "", detail: null,
     fxNote: "", divNote: "",
     // 自定义月度区间
@@ -67,6 +67,7 @@ Page({
       const ytd = this.wins.findIndex((w) => w.key === "ytd");
       this.setData({
         winOptions: this.winLabels(d, CURS[this.data.curIdx].key),
+        winChip: (this.wins[ytd < 0 ? 0 : ytd] || {}).label || "",
         grpOptions: this.grps.map((g) => g.label),
         winIdx: ytd < 0 ? 0 : ytd,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
@@ -90,10 +91,13 @@ Page({
     }
   },
 
+  /** chip 上只放短名；下拉列表里才带「（N 个市场）」，否则 chip 会宽到挤爆筛选条。 */
+  chipLabel(i) { return i === this.wins.length ? "自定义区间" : (this.wins[i] || {}).label || ""; },
+
   onWin(e) {
     const i = +e.detail.value;
     const isCustom = i === this.wins.length;   // 最后一项是「自定义月度区间…」
-    this.setData({ winIdx: i, isCustom, expanded: "" });
+    this.setData({ winIdx: i, isCustom, expanded: "", winChip: this.chipLabel(i) });
     if (isCustom) return this.ensureMonthly();
     this.render();
   },
