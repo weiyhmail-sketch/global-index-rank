@@ -1,8 +1,7 @@
 name: 探测新浪源境外可达性
 
-# 关键问题：云函数免费版超时仅 3 秒（调高需付费版 ¥19.9/月），
-# 33 个指数跑不完。若新浪对境外 IP 可达，就把重活挪到 Actions，
-# 云函数退化成「取一个 JSON 写库」的轻活。
+# 云函数免费版超时仅 3 秒且不可调（调高需付费版），33 个指数跑不完。
+# 若新浪对境外 IP 可达，就把重活挪到 Actions，云函数只做「取 JSON 写库」。
 on:
   workflow_dispatch:
 
@@ -11,12 +10,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: 出口 IP
-        run: curl -s https://api.ipify.org; echo
+        run: |
+          curl -s https://api.ipify.org; echo
       - name: 新浪环球指数
-        run: curl -s -m 20 -H "Referer: https://finance.sina.com.cn" "https://gi.finance.sina.com.cn/hq/daily?symbol=DAX&num=3" | head -c 200; echo
+        run: |
+          curl -s -m 20 -H 'Referer: https://finance.sina.com.cn' \
+            'https://gi.finance.sina.com.cn/hq/daily?symbol=DAX&num=3' | head -c 200; echo
       - name: 新浪 A 股
-        run: curl -s -m 20 -H "Referer: https://finance.sina.com.cn" "https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh000001&scale=240&ma=no&datalen=3" | head -c 200; echo
+        run: |
+          curl -s -m 20 -H 'Referer: https://finance.sina.com.cn' \
+            'https://money.finance.sina.com.cn/quotes_service/api/json_v2.php/CN_MarketData.getKLineData?symbol=sh000001&scale=240&ma=no&datalen=3' | head -c 200; echo
       - name: 新浪美股（私有编码）
-        run: curl -s -m 20 -H "Referer: https://stock.finance.sina.com.cn" "https://finance.sina.com.cn/staticdata/us/.INX" | head -c 120; echo
+        run: |
+          curl -s -m 20 -H 'Referer: https://stock.finance.sina.com.cn' \
+            'https://finance.sina.com.cn/staticdata/us/.INX' | head -c 120; echo
       - name: 新浪港股（私有编码）
-        run: curl -s -m 20 -H "Referer: https://stock.finance.sina.com.cn" "https://finance.sina.com.cn/stock/hkstock/HSI/klc2_kl.js?d=2023_5_01" | head -c 120; echo
+        run: |
+          curl -s -m 20 -H 'Referer: https://stock.finance.sina.com.cn' \
+            'https://finance.sina.com.cn/stock/hkstock/HSI/klc2_kl.js?d=2023_5_01' | head -c 120; echo
