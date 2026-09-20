@@ -141,6 +141,14 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
         }
       }
 
+      // 为什么不可得，要分开记。两种成因在界面上该说不同的话：
+      //   short —— 该指数历史不够长，「数据自 X 起」是真话
+      //   gap   —— 历史够长，只是起点落在休市期内(如农历新年)回溯超限，
+      //            这时候说「数据自 X 起」就是假话
+      if (!st || st < first) row[key].why = "short";
+      else if (tooFar) row[key].why = "gap";
+      else if (spans[key]) row[key].back = spans[key];
+
       for (const cur of ["local", "usd", "cny"]) {
         // 数据起点晚于窗口起点 → 不可得，显示「—」而非用首日充数
         if (!st || st < first || tooFar) { row[key][cur] = null; continue; }
@@ -198,7 +206,12 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
     w.days = st && refAsof
       ? Math.round((new Date(refAsof + "T00:00:00Z") - new Date(st + "T00:00:00Z")) / 86400000)
       : null;
-    w.n = Object.values(snapshot).filter((r) => r[w.key] && r[w.key].local !== null).length;
+    // 三种口径各数一份。原先只按 local 数了一个 w.n，而默认榜单是人民币口径：
+    // 实测 y3 的 local 有 32 个、人民币只有 28 个。一个名字听起来通用、
+    // 值却只对一种口径的字段，放在那里等着被误用。
+    w.n = {};
+    for (const cur of ["local", "usd", "cny"])
+      w.n[cur] = Object.values(snapshot).filter((r) => r[w.key] && r[w.key][cur] !== null).length;
   }
 
   return { meta, snapshot, windows: winMeta.filter((w) => !w.key.startsWith("anchor:")),

@@ -34,7 +34,8 @@ Page({
     rows: [], naCount: 0, expanded: "", detail: null,
     fxNote: "", divNote: "",
     // 自定义月度区间
-    isCustom: false, monthOptions: [], m0Idx: 0, m1Idx: 0, monthlyLoading: false,
+    isCustom: false, monthOptions: [], m0Options: [], m1Options: [],
+    m0Idx: 0, m1Idx: 0, m1Sel: 0, monthlyLoading: false,
   },
 
   onLoad() { this.load(); },
@@ -65,7 +66,7 @@ Page({
 
       const ytd = this.wins.findIndex((w) => w.key === "ytd");
       this.setData({
-        winOptions: [...this.wins.map((w) => w.label), "自定义月度区间…"],
+        winOptions: this.winLabels(d, CURS[this.data.curIdx].key),
         grpOptions: this.grps.map((g) => g.label),
         winIdx: ytd < 0 ? 0 : ytd,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
@@ -102,13 +103,9 @@ Page({
       if (!d || !d.ok) throw new Error((d && d.error) || "月度数据为空");
       this.monthly = d;
       const n = d.months.length;
-      this.setData({
-        monthOptions: d.months,
-        // 默认起点取去年末，终点取最新
-        m0Idx: Math.max(0, d.months.indexOf(String(+d.dataAsof.slice(0, 4) - 1) + "-12")),
-        m1Idx: n - 1,
-        monthlyLoading: false,
-      });
+      this.setData({ monthOptions: d.months, monthlyLoading: false });
+      // 默认起点取去年末，终点取最新；两个 range 也在这里一并算出来
+      this.syncMonthPickers(Math.max(0, d.months.indexOf(String(+d.dataAsof.slice(0, 4) - 1) + "-12")), n - 1);
       this.render();
     } catch (e) {
       this.setData({ monthlyLoading: false, error: e.message || String(e) });
@@ -117,18 +114,64 @@ Page({
 
   // 两个 picker 看起来对称，很容易选反。选反后 b/a-1 照样出榜，
   // 印度今年以来 -21.83% 倒过来就成了 +27.92% 的第一名。
+  // 两个 picker 各有自己的 range，非法项根本不出现在列表里。
+  //
+  // 原先两个 picker 共用一份 monthOptions，靠 handler 事后夹紧，结果是：
+  // 终点选第一项 → m0Idx = -1 → 标题渲染成「undefined 月末」+ 空榜 + 无提示；
+  // 起点选最后一项 → 被 Math.min 压回去变成起止同月，而那正是上一轮要禁的情形。
+  // 事后夹紧还有个毛病：用户选了 A 却跳到 B，像点错了。不给他选才是对的。
+  //
+  //   起点列表 = months[0 .. n-2]        （起点不能是最后一个月）
+  //   终点列表 = months[m0Idx+1 .. n-1]  （终点必须晚于起点）
+  // m1Idx 始终存绝对下标，m1Sel 是它在终点列表里的位置。
+  syncMonthPickers(i0, i1) {
+    const months = this.data.monthOptions;
+    const n = months.length;
+    const m0Idx = Math.max(0, Math.min(i0, n - 2));
+    const m1Idx = Math.max(m0Idx + 1, Math.min(i1, n - 1));
+    this.setData({
+      m0Idx, m1Idx,
+      m0Options: months.slice(0, n - 1),
+      m1Options: months.slice(m0Idx + 1),
+      m1Sel: m1Idx - m0Idx - 1,
+      expanded: "",
+    });
+  },
+
   onM0(e) {
-    const i = +e.detail.value;
-    const j = Math.max(i + 1, this.data.m1Idx);
-    this.setData({ m0Idx: i, m1Idx: Math.min(j, this.data.monthOptions.length - 1), expanded: "" });
+    this.syncMonthPickers(+e.detail.value, this.data.m1Idx);
     this.render();
   },
   onM1(e) {
-    const j = +e.detail.value;
-    this.setData({ m1Idx: j, m0Idx: Math.min(this.data.m0Idx, j - 1), expanded: "" });
+    // 终点 picker 的下标是相对的，换算回绝对下标
+    this.syncMonthPickers(this.data.m0Idx, this.data.m0Idx + 1 + (+e.detail.value));
     this.render();
   },
-  onCur(e) { this.setData({ curIdx: +e.detail.value, expanded: "" }); this.render(); },
+  /**
+   * 窗口下拉的文案：可比市场数少于全池时直接标出来。
+   *
+   * 「近5年」只有 5 个市场可比、「疫情底以来」同理 —— 用户切过去才发现榜单
+   * 从 33 行缩到 5 行，会以为出了问题。点之前就说清楚，别扭感就没了。
+   * 数量按当前口径取：原币 32 个可比的窗口，人民币只有 28 个。
+   */
+  winLabels(d, cur) {
+    const total = (d.meta || []).length;
+    return [
+      ...this.wins.map((w) => {
+        const n = w.n && typeof w.n === "object" ? w.n[cur] : w.n;
+        return (n !== undefined && n !== null && n < total) ? `${w.label}（${n} 个市场）` : w.label;
+      }),
+      "自定义月度区间…",
+    ];
+  },
+
+  onCur(e) {
+    const curIdx = +e.detail.value;
+    this.setData({ curIdx, expanded: "" });
+    // 换口径会改变可比市场数，下拉文案跟着更新
+    if (this.raw) this.setData({ winOptions: this.winLabels(this.raw, CURS[curIdx].key) });
+    this.render();
+  },
   onTier(e) { this.setData({ tierIdx: +e.detail.value, expanded: "" }); this.render(); },
   onGrp(e) { this.setData({ grpIdx: +e.detail.value, expanded: "" }); this.render(); },
 
@@ -159,19 +202,23 @@ Page({
     const val = (code) => {
       if (custom) {
         const v = customVal(code, cur);
-        if (v !== null) return { v, fb: false };
-        if (cur === "local") return { v: null, fb: false };
+        if (v !== null) return { v, fb: false, why: null };
+        if (cur === "local") return { v: null, fb: false, why: "short" };
         const loc = customVal(code, "local");
-        return loc !== null ? { v: loc, fb: true } : { v: null, fb: false };
+        return loc !== null ? { v: loc, fb: true, why: null } : { v: null, fb: false, why: "short" };
       }
       const r = d.snapshot[code] && d.snapshot[code][win];
       if (!r) return { v: null, fb: false };
+      // why 是构建侧记下的「为什么取不到」：short=历史不够长 / gap=起点落在休市期
+      const why = r.why || null;
       const v = r[cur];
-      if (v !== null && v !== undefined) return { v, fb: false };
-      if (cur === "local") return { v: null, fb: false };
-      // 该口径无汇率时退回原币值参与排名并标注，不让市场凭空消失
+      if (v !== null && v !== undefined) return { v, fb: false, why };
+      if (cur === "local") return { v: null, fb: false, why };
+      // 原币也没有 → 是数据本身不可得；原币有而该口径没有 → 是缺汇率，走 fb 那条路
       const loc = r.local;
-      return (loc !== null && loc !== undefined) ? { v: loc, fb: true } : { v: null, fb: false };
+      return (loc !== null && loc !== undefined)
+        ? { v: loc, fb: true, why }
+        : { v: null, fb: false, why };
     };
 
     // 三分而非二分。
@@ -204,6 +251,14 @@ Page({
           : (delta > 0 ? "↑" : "↓") + Math.abs(delta),
         deltaCls: delta > 0 ? "up" : "down",
         start: r.m.start,
+        // 「数据不足」有两种成因，说同一句话会说出假话：
+        //   short —— 该指数历史确实不够长，「数据自 X 起」是真话
+        //   gap   —— 历史够长，只是起点落在休市期内（台湾农历新年休市 11-13 天，
+        //            超过回溯上限）。这时再写「数据自 2022-08-08 起」+「近3月数据不足」
+        //            就是自相矛盾——实测这两句话真的同时出现在屏幕上。
+        naNote: r.why === "gap" ? "起点落在休市期内，无可比收盘价"
+              : r.why === "short" ? `数据自 ${r.m.start} 起`
+              : "",
         asofTag: (r.m.asof !== this.baseAsof ? " · 截至" + r.m.asof.slice(5) : "")
           // 长假后「最近交易日」是跨假期的累计涨幅，如实标注
           + (win === "d1" && r.m.d1Span > 4 ? ` · 跨${r.m.d1Span}天` : ""),

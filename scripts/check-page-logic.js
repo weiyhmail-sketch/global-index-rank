@@ -110,6 +110,54 @@ require("../miniprogram/pages/index/index.js");
   check(diffN === 0, `自定义区间与预置今年以来有 ${diffN} 处不一致`);
   console.log(diffN === 0 ? "  与预置「今年以来」逐项一致 ✅" : "");
 
+  // ---- 自定义月度区间：穷举两个 picker 的每一种选择 ----
+  //
+  // 上一轮的「互相约束」是事后夹紧，留了两个洞：终点选第一项 → m0Idx = -1 →
+  // 标题「undefined 月末」+ 空榜 + 零提示；起点选最后一项 → 被压回去变成起止同月。
+  // 现在两个 picker 各有自己的 range，非法项不出现在列表里。
+  // 穷举比举例可靠——这两个洞当初就是「看起来两边都夹了」才漏掉的。
+  console.log("\n自定义月度区间 · 穷举 picker 选择:");
+  const mn = inst.data.monthOptions.length;
+  let bad = 0;
+  const audit = (how) => {
+    const d = inst.data;
+    if (d.m0Idx < 0 || d.m0Idx > mn - 2) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: m0Idx=${d.m0Idx} 越界`); return; }
+    if (d.m1Idx <= d.m0Idx || d.m1Idx > mn - 1) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: m1Idx=${d.m1Idx} 不晚于起点或越界`); return; }
+    if (d.m1Sel !== d.m1Idx - d.m0Idx - 1) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: m1Sel 与 m1Idx 对不上`); return; }
+    if (d.m1Options[d.m1Sel] !== d.monthOptions[d.m1Idx]) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: 终点 picker 显示的月份不是实际起算月份`); return; }
+    inst.render();
+    if (/undefined/.test(inst.data.sub + inst.data.ledeHead)) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: 标题里出现 undefined「${inst.data.ledeHead}」`); return; }
+    if (!inst.data.rows.length && !inst.data.naRows.length) { bad++; if (bad <= 3) console.log(`  ✗ ${how}: 榜单为空且无任何解释`); }
+  };
+  for (let i = 0; i < inst.data.m0Options.length; i++) { inst.onM0({ detail: { value: i } }); audit(`起点选第 ${i} 项`); }
+  inst.onM0({ detail: { value: 0 } });
+  for (let j = 0; j < inst.data.m1Options.length; j++) { inst.onM1({ detail: { value: j } }); audit(`终点选第 ${j} 项`); }
+  // picker 给的值本不该越界，但组件行为不归我们管，兜一下
+  [-1, mn, mn + 5].forEach((v) => { inst.onM0({ detail: { value: v } }); audit(`起点收到越界值 ${v}`); });
+  [-1, mn, mn + 5].forEach((v) => { inst.onM1({ detail: { value: v } }); audit(`终点收到越界值 ${v}`); });
+  check(bad === 0, `月度区间 picker 有 ${bad} 种选择会产生非法状态`);
+  console.log(bad === 0 ? `  ${inst.data.m0Options.length} + ${mn - 1} 种选择 + 6 个越界值，全部合法 ✅` : "");
+
+  // ---- 口径说明页与代码是否还对得上 ----
+  //
+  // 加这一节是因为：修复时新写了「口径不完整的市场」一节，旧的「汇率缺失」一节
+  // 忘了删，于是同一个页面对「缺汇率的市场参不参与排名」给出了两个相反的答案——
+  // 而这恰好是整个产品被讨论最多的一个设计决策。
+  // 文案会漂，这几条断言丑但会红。
+  console.log("\n口径说明页 vs 代码:");
+  const about = fs.readFileSync(path.join(__dirname, "..", "miniprogram", "pages", "about", "about.wxml"), "utf8");
+  const docFail = [];
+  if (/仍参与排名/.test(about) && /不参与排名/.test(about))
+    docFail.push("about 页同时出现「仍参与排名」和「不参与排名」——自相矛盾");
+  // 代码确实把缺口径的行移出排序（index.js 的三分法），说明页必须这么写
+  if (!/不参与排名/.test(about))
+    docFail.push("代码把缺口径的行移出了排名，说明页却没说");
+  // 回溯上限会让「明明有数据」的区间显示「—」，说明页不提的话用户无从理解
+  if (!/回溯|长假|休市/.test(about))
+    docFail.push("代码有起点回溯上限，说明页没有任何解释");
+  docFail.forEach((f) => { fail.push(f); console.log("  ✗ " + f); });
+  if (!docFail.length) console.log("  说明页与代码一致 ✅");
+
   console.log();
   if (fail.length) { console.log("❌ 发现问题:"); fail.forEach((f) => console.log("  " + f)); process.exit(1); }
   console.log("✅ 页面逻辑全部检查通过");

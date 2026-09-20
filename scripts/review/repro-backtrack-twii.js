@@ -34,8 +34,12 @@ require(path.resolve("miniprogram/pages/index/index.js"));
   if(inOk) console.log("  排名区:",JSON.stringify(inOk.pct));
   if(inFb) console.log("  仅原币区:",JSON.stringify(inFb.pct));
   if(inNa) console.log(`  数据不足区 → 「以下 ${inst.data.naRows.length} 个市场在本区间数据不足」`);
-  if(inNa) console.log(`            行内文案：中国台湾 · 台湾加权指数（数据自 ${inNa.start} 起） —`);
-  console.log("\n  ↑ 这句话是假的：台湾数据自 " + tw.start + " 起，近3月绰绰有余。");
-  console.log("    真实原因是起点 2026-02-22 落在农历新年休市（11 天），被 10 天上限判了死刑。");
+  // 读页面真正渲染的 naNote，别自己拼一句 —— 自己拼的话，代码改对了脚本也看不见
+  if(inNa) console.log(`            行内文案：中国台湾 · 台湾加权指数（${inNa.naNote}） —`);
+  const lying = inNa && /数据自/.test(inNa.naNote || "");
+  console.log(lying
+    ? "\n  ↑ 这句话是假的：台湾数据自 " + tw.start + " 起，近3月绰绰有余。\n    真实原因是起点落在农历新年休市，被回溯上限判了死刑。"
+    : "\n  ↑ 文案说出了真实原因，没有假装是「数据不够长」。");
+  console.log("");
   console.log("\n结论条:", inst.data.stats);
 })();

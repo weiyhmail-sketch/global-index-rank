@@ -26,11 +26,11 @@
   <view wx:if="{{isCustom}}" class="card months">
     <view wx:if="{{monthlyLoading}}" class="hint">加载月度数据…</view>
     <block wx:else>
-      <picker mode="selector" range="{{monthOptions}}" value="{{m0Idx}}" bindchange="onM0">
+      <picker mode="selector" range="{{m0Options}}" value="{{m0Idx}}" bindchange="onM0">
         <view class="msel">{{monthOptions[m0Idx]}} 月末</view>
       </picker>
       <text class="marrow">→</text>
-      <picker mode="selector" range="{{monthOptions}}" value="{{m1Idx}}" bindchange="onM1">
+      <picker mode="selector" range="{{m1Options}}" value="{{m1Sel}}" bindchange="onM1">
         <view class="msel">{{monthOptions[m1Idx]}}</view>
       </picker>
       <view class="mnote">取该月末或之前最近一个交易日的真实收盘价</view>
@@ -117,13 +117,13 @@
       </block>
 
       <block wx:if="{{naRows.length}}">
-        <view class="sechd">以下 {{naRows.length}} 个市场在本区间数据不足</view>
+        <view class="sechd">以下 {{naRows.length}} 个市场在本区间无可比数据</view>
         <view wx:for="{{naRows}}" wx:key="code" class="row dim">
           <view class="rk">—</view>
           <view class="nm">
             <text class="flag">{{item.flag}}</text>
             <text class="country">{{item.country}}</text>
-            <text class="idx">{{item.name}}（数据自 {{item.start}} 起）</text>
+            <text class="idx">{{item.name}}{{item.naNote ? '（' + item.naNote + '）' : ''}}</text>
           </view>
           <view class="pc na">—</view>
           <view class="bar-cell"></view>
