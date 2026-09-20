@@ -49,6 +49,16 @@ jobs:
           git push -qf "https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${GITHUB_REPOSITORY}.git" data
           echo "已发布到 data 分支"
 
+      - name: 刷新 jsDelivr 缓存
+        run: |
+          # jsDelivr 对分支引用缓存很久，不主动 purge 的话云函数会一直吃到旧数据
+          # （实测推送新版后 ingest 仍取到上一版）。
+          for f in snapshot.json fx.json series.json; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" \
+              "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@data/${f}")
+            echo "  purge ${f} -> HTTP ${code}"
+          done
+
       - name: 摘要
         run: |
           node -e '
