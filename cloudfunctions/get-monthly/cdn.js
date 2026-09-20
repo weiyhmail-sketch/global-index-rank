@@ -9,9 +9,18 @@ const https = require("https");
 const zlib = require("zlib");
 
 const REPO = "weiyhmail-sketch/global-index-rank";
+
+/**
+ * 源顺序：raw.githubusercontent 优先，jsDelivr 兜底。
+ *
+ * jsDelivr 会把分支名 `@data` 解析到的 commit 缓存住，purge 单个文件
+ * 并不会让它重新解析分支 HEAD —— 实测 purge 返回 finished、两个 provider
+ * 都清了、cache 显示 MISS 确实回源，内容仍是上一版。
+ * 分支型 jsDelivr URL 不适合频繁更新的数据，只能退居兜底。
+ */
 const sources = (f) => [
-  `https://cdn.jsdelivr.net/gh/${REPO}@data/${f}`,
   `https://raw.githubusercontent.com/${REPO}/data/${f}`,
+  `https://cdn.jsdelivr.net/gh/${REPO}@data/${f}`,
 ];
 
 function get(url, timeout = 2400, depth = 0) {
