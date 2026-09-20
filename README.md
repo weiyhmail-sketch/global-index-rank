@@ -12,6 +12,7 @@
 | [docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md) | 产品方案（自包含，供产品评审） |
 | [docs/NEW_SESSION_PROMPT.md](docs/NEW_SESSION_PROMPT.md) | 开新 session 做产品评审的启动 prompt |
 | [docs/REGISTER_SESSION_PROMPT.md](docs/REGISTER_SESSION_PROMPT.md) | 开新 session 带你注册 AppID + 云开发环境 |
+| [docs/ADVERSARIAL_REVIEW_PROMPT.md](docs/ADVERSARIAL_REVIEW_PROMPT.md) | 开新 session 做对抗性审查（找 bug + 金融视角 UI） |
 | 本文件 | 工程说明、用法、数据陷阱 |
 
 最初的技术方案见 `~/.claude/plans/1-2-3-elegant-sphinx.md`。
