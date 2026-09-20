@@ -1,116 +1,168 @@
 # 全球股市涨幅排行
 
-全球各国主权股指的涨幅排行榜。目标形态为微信小程序，当前处于 **P1 数据底座** 阶段，
-已产出可双击打开的单文件 HTML 原型用于验证数据口径。
+27 个国家与地区、33 个主权股指的涨幅排行榜，支持人民币 / 美元 / 原币种三种计价口径。
+形态是微信小程序（原生 + 云开发）。
 
-## 文档
+榜单数据每日收盘后自动更新：GitHub Actions 构建 → 推到 `data` 分支 → 云函数按需取回。
 
-| 文档 | 给谁看 |
-|---|---|
-| [docs/TODO_USER.md](docs/TODO_USER.md) | **你** —— 需要你亲自做的事项清单 |
-| [docs/STATUS.md](docs/STATUS.md) | 整体进展、验证记录、已知问题 |
-| [docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md) | 产品方案（自包含，供产品评审） |
-| [docs/NEW_SESSION_PROMPT.md](docs/NEW_SESSION_PROMPT.md) | 开新 session 做产品评审的启动 prompt |
-| [docs/REGISTER_SESSION_PROMPT.md](docs/REGISTER_SESSION_PROMPT.md) | 开新 session 带你注册 AppID + 云开发环境 |
-| [docs/ADVERSARIAL_REVIEW_PROMPT.md](docs/ADVERSARIAL_REVIEW_PROMPT.md) | 开新 session 做对抗性审查（找 bug + 金融视角 UI） |
-| 本文件 | 工程说明、用法、数据陷阱 |
-
-最初的技术方案见 `~/.claude/plans/1-2-3-elegant-sphinx.md`。
-
-## 当前进度
+## 当前状态
 
 | 阶段 | 状态 |
 |---|---|
-| P1 数据底座 | ✅ 完成（数据源、汇率、快照计算、质量检查、HTML 原型） |
-| P2 云端化（CloudBase 云函数 + 定时触发） | 未开始 |
-| P3 小程序前端 | 未开始 |
-| P4 热力图 / 分享长图 | 未开始 |
-| P5 发布（待企业主体就绪） | 阻塞：个人主体无法发布金融类目 |
+| P1 数据底座 | ✅ 数据源、汇率、快照计算、质量检查、单文件 HTML 原型 |
+| P2 云端化 | ✅ GitHub Actions 每日构建 + 四个零依赖云函数 |
+| P3 小程序前端 | ✅ 排行榜 / 详情页 / 自定义月度区间 / 口径说明页 |
+| P4 增强 | ⏸ 年化、四分位距、最大回撤、净值归一化图等，已评估、推后 |
+| P5 公开发布 | ⛔ **走不通**，见下 |
 
-**当前数据覆盖 18 / 48 个指数**，因为本机全局代理导致东财源不可用（见下）。
+**可用形态：体验版**（微信后台设为体验版，最多 15 名体验成员）。开发版预览也能直接扫码上手机。
+
+### 为什么公开发布走不通
+
+按微信《开放的服务类目》原文：
+
+- 金融业整个大类**对个人主体不开放**，没有例外。个人主体能选的只有物流、教育信息展示、
+  代驾、生活服务、餐厅排队、出境 WiFi、工具、商业服务、体育——没有任何资讯类目。
+- 换企业主体后，「金融业-股票信息服务平台（港股/美股）」**资质要求为空**，这是一条真路；
+  但 A 股那 4 个指数落在「股票信息服务平台」，需要上交所《证券信息经营许可合同》
+  和深交所《专有信息经营许可合同》，机构级门槛。
+- 日经、DAX、KOSPI 这类既非港股也非美股的指数，文档里没有对应类目，需审核方认定。
+
+把股指行情包装成非金融类目不可行：类目按**内容**判定，填错是驳回和下架的常见理由。
+
+## 架构
+
+```
+GitHub Actions（每日 UTC 22:37 ≈ 北京时间 06:37）
+  └─ scripts/build-data.js
+       ├─ 新浪四条线抓 33 个指数日线
+       ├─ Frankfurter / currency-api 抓 20 种汇率（增量）
+       ├─ 频率校验、快照计算、走势图分片
+       └─ 强推到孤儿分支 data/（单提交，不涨历史）
+
+云函数（零依赖，四个：get-snapshot / get-chart / get-series / get-monthly）
+  └─ 从 raw.githubusercontent 取产物，jsDelivr 对冲兜底
+
+小程序
+  ├─ 首页：排行榜 + 结论条 + 四个筛选器
+  ├─ 详情页：走势图 + 各区间涨幅 + 逐年涨幅
+  └─ 关于页：数据口径与免责声明
+```
+
+**这个架构完全由一条约束决定：云开发免费版云函数超时固定 3 秒且不可调。**
+带 `wx-server-sdk` 的函数冷启动就会超时，所以所有读取函数零依赖、直接从 CDN 取构建产物；
+33 个指数的抓取和计算也塞不进 3 秒，所以重活全部放在 GitHub Actions。
 
 ## 用法
 
 ```bash
-python3 scripts/fetch_indices.py      # 抓指数日线(带缓存, 当日已抓则跳过)
-python3 scripts/fetch_fx.py           # 抓汇率
-python3 scripts/check_data.py         # 数据质量检查, 有问题时退出码为 1
-python3 scripts/build_snapshot.py     # 算快照 -> data/app_data.json
-python3 scripts/build_prototype.py    # 注入数据 -> prototype/index.html
+node scripts/build-data.js          # 完整构建 → dist/（约 2-3 秒）
+gh workflow run daily.yml           # 手动触发线上构建
 ```
 
-`prototype/index.html` 双击即可打开，数据已内联，无需服务器。
-
-## ⚠️ 补齐剩余 30 个指数
-
-本机 `HTTP_PROXY=127.0.0.1:10808` 把全部流量导向机房 IP（`45.76.215.254`），
-**东方财富对机房/境外 IP 直接拒连**，因此依赖东财的 30 个指数全部抓取失败。
-
-关闭全局代理后重跑即可补齐：
+验证（七个，都能直接跑）：
 
 ```bash
-env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY python3 scripts/fetch_indices.py --force
+node scripts/check-golden.js        # 黄金测试：2319 个数值 vs 签入期望值
+node scripts/check-page-logic.js    # 首页逻辑 + 月份 picker 穷举 + 文案护栏
+node scripts/check-detail-logic.js  # 详情页图表/格子一致性 + 竞态 + 加载失败路径
+node scripts/check-cdn-hedge.js     # 取数对冲的九种网络情形
+node scripts/check-count-guard.js   # 指数数量守卫会不会真的触发
+node scripts/check-fx-stale.js      # 汇率停更时是否如实退回原币口径
+node scripts/verify-node-vs-python.js   # 与 Python 原版的等价性（历史遗留）
 ```
 
-同理，`LKR / PKR / VND` 三种汇率依赖 Yahoo 备源，也需在非机房 IP 下才能取到。
-云函数环境不存在此问题。
+改了 `cloudfunctions/lib/` 里的共享库之后要同步：`bash scripts/sync-cloud-lib.sh`
+（微信云函数按目录独立部署，且 CLI 打包不支持子目录，只能平铺各存一份）。
 
 ## 数据源
 
-| 用途 | 主源 | 备源 |
+| 用途 | 来源 | 覆盖 |
 |---|---|---|
-| 指数日线 | 东方财富 `push2his`（48 个，需国内 IP，必须带 `ut` 参数） | 新浪 `gi.finance.sina.com.cn`（18 个，**上限 1000 条约 4 年**） |
-| 汇率 | Frankfurter / 欧洲央行（25 种，可回溯至 1999） | Yahoo `{CCY}=X`（补 LKR/PKR/VND） |
+| 指数日线 | 新浪 `gi.finance.sina.com.cn`（环球） | 24 |
+| | 新浪 A 股日线 | 4 |
+| | 新浪美股（私有编码） | 3 |
+| | 新浪港股（私有编码） | 2 |
+| 汇率 | Frankfurter / 欧洲央行 → currency-api 兜底 | 20 种 |
 
-**限速**：东财实测连发 9 个无间隔请求会被封 IP 数小时。`fetch_indices.py` 默认间隔 0.45s。
+历史最长回溯至 2004-01-02（美股线），最短 2023-11-16（巴基斯坦，见下）。
 
-## 已知数据陷阱（均已在代码中处理）
+### 用不了的源（别再试了）
 
-1. **新浪休市日返回 `c="0"`** — 字符串 `"0"` 为真值，若只判 `if r.get("c")` 会让 0 混入，
-   污染跨该日的全部区间计算。实测印尼指数有 7 处、印度 4 处。已显式剔除非正数。
-2. **欧洲央行停发新台币汇率**（最后更新 2020-10-30）— 拿陈旧汇率算近期涨幅会产生
-   离谱且不易察觉的错误。`fetch_fx.py` 对滞后超过 30 天的货币一律按缺失处理。
-3. **新浪源只有约 4 年历史** — 因此「近5年」窗口对新浪源指数显示「—」。
-   补齐东财源后自动恢复。
-4. **数据起点晚于窗口起点** — 显示「—」，不拿首日数据充数。
-
-`check_data.py` 会持续监控这几类问题。注意它也会报出**真实的市场事件**，需人工定性：
-已确认属正常的有 印尼开斋节休市、台湾春节休市、日经 2024-08-05 单日 -12.4%、
-韩国 2026 年的剧烈波动（已对 Yahoo 交叉验证）。
+- **东方财富**：按 **TLS 指纹**拦截非浏览器客户端。Chrome 能开，curl 和 Node 都是 ECONNRESET
+  ——这和 IP 无关（早期误判成「拒绝机房 IP」，是错的）。不绕过。
+- **Yahoo Finance**：对机房 IP 一律 429。
+- **stooq**：人机验证。
 
 ## 数据口径
 
-- **价格指数，不含股息。** 各国股息率差异显著，长周期比较会系统性低估高股息市场。
-- **三种计价口径**：本币 / 美元 / 人民币。换算公式 `点位 ÷ (1美元兑本币汇率)`，
-  区间两端各自按其对应日期的汇率换算。跨国比较应看美元口径。
-- **交易日对齐**：每个指数取自己最近一个已收盘交易日；区间起点取「该日或之前最近
-  一个交易日」的收盘价，不插值。
+- **价格指数，不含股息。** 各国股息率差异显著（英国约 4%/年、日本约 2%），
+  长周期比较会系统性低估高股息市场。区间跨度 ≥90 天时界面会提示。
+- **三种计价口径**：人民币（默认）/ 美元 / 原币种。区间两端各自按其对应日期的汇率换算。
+  **缺汇率的行不参与排名**，单列一区只给原币值——排序是跨市场比较，要求同一度量，
+  而缺汇率的恰恰是货币在贬值的新兴市场，混进去必然浮到榜首。
+- **交易日对齐**：每个指数取自己最近一个已收盘交易日；区间起点取「该日或之前最近一个
+  交易日」的收盘价，不插值。回溯天数按指数自适应（p99.9 + 2，夹在 8–20 天），
+  超限显示「—」并注明「起点落在休市期内」。
+- **拿不到就显示「—」**，不用首日数据充数、不估算填充。
 
-## 验证记录（2026-09-19）
+## 已知数据陷阱（均已在代码中处理）
 
-对 Yahoo Finance 交叉验证，全部精确匹配：
+1. **新浪休市日返回 `c="0"`** —— 字符串 `"0"` 是真值，只判 `if (r.c)` 会让 0 混进去，
+   污染跨该日的全部区间。实测印尼 7 处、印度 4 处。
+2. **欧洲央行停发部分货币汇率**（新台币 2020 年、卢布 2022 年）—— 拿陈旧汇率算近期涨幅
+   会产生离谱且不易察觉的错误。停更 >7 天打标记并退回原币口径，>30 天整个删除。
+3. **巴基斯坦 2023-11-16 之前是月频数据** —— 混进日频榜单会让区间起点偏十几天。
+   构建时按观测密度校验，判为非日频的年份整段剔除，界面注明「已剔除」。
+4. **jsDelivr 缓存分支→commit 的解析结果** —— purge 单个文件不会让它重新解析分支 HEAD，
+   所以 raw.githubusercontent 是主源，jsDelivr 只作对冲兜底。
 
-| | 本项目 | Yahoo |
-|---|---|---|
-| 韩国 KOSPI 收盘 | 6,894.23 | 6,894.23 |
-| 台湾加权 | 47,180.75 | 47,180.75 |
-| 印尼 JKSE | 6,441.16 | 6,441.16 |
-| KOSPI 2025 年末基准 | 4,214.17 | 4,214.17 |
-| KOSPI YTD 本币 | +63.60% | — |
+## 文档
 
-日经 225 的本币/美元/人民币三口径换算亦已手工逐步验算一致。
+| 文档 | 内容 |
+|---|---|
+| [docs/STATUS.md](docs/STATUS.md) | **整体进展、验证记录、所有已知限制与决策理由**（最长，但最值得读） |
+| [docs/TODO_USER.md](docs/TODO_USER.md) | 需要你亲自做的事项清单 |
+| [docs/PRODUCT_PLAN.md](docs/PRODUCT_PLAN.md) | 产品方案（自包含） |
+| [docs/PRODUCT_REVIEW.md](docs/PRODUCT_REVIEW.md) | 产品经理视角评审（9 条，采纳 7 条） |
+| [docs/ADVERSARIAL_REVIEW.md](docs/ADVERSARIAL_REVIEW.md) | 第一轮对抗性审查（22 条，修 16 条，3 条我的判断被推翻） |
+| [docs/REVIEW_R2.md](docs/REVIEW_R2.md) | 第二轮对抗性审查（22 条，修 21 条，靶子是第一轮的修复本身） |
+| `docs/*_PROMPT.md` | 开新 session 做各类评审的启动 prompt |
+
+## 两轮对抗性审查找到的最有价值的东西
+
+不是算错的数，而是**验证本身是假的**：
+
+- 第一轮：`check-detail-logic.js` 给 get-chart 写的桩忽略了 `data.from`，永远返回整份文件，
+  被测代码一次都没跑到，而文档里写着「图表与榜单一致性 ✅」。实际最大偏差 40.49 个百分点。
+- 第二轮：图表一致性的断言不检查自己有没有真的比过。把标题整个改成空串，
+  它照样打印「15 个组合全部一致 ✅」——实际比对 **0 次**，而「15」还是手写常量。
+
+配套发现的另一个模式：**写下防护 → 不验证它会不会触发 → 记一笔「已修」**。
+四个实例：`fx.js` 的增量断链、`cdn.js` 够不着的串行兜底、从未运行过的指数数量守卫、
+传了三层没人读的汇率停更标记。
+
+现在的纪律：**每加一道防护，就写一个让它触发的用例**，
+并且每个修复都要验证「改坏了会红」。
 
 ## 目录
 
 ```
-scripts/indices.py          48 个指数的元数据(代码/国家/货币/数据源)
-scripts/nethttp.py          统一 HTTP 工具(本机 Python 缺 CA 证书, 用 certifi)
-scripts/fetch_indices.py    指数日线抓取(多源 + 限速 + 缓存)
-scripts/fetch_fx.py         汇率抓取(含停更检测)
-scripts/check_data.py       数据质量检查
-scripts/build_snapshot.py   快照计算 -> data/app_data.json
-scripts/build_prototype.py  单文件 HTML 打包
-prototype/template.html     原型模板(含 /*__DATA__*/ 占位符)
-prototype/index.html        生成物, 双击可开
-data/raw/                   原始缓存(逐指数 JSON + fx.json)
+scripts/build-data.js        每日构建：抓取 → 计算 → 产出 dist/
+scripts/check-*.js           七个验证脚本（见「用法」）
+scripts/review/              两轮审查的复现脚本
+cloudfunctions/lib/          共享库（snapshot 计算 / 汇率 / CDN 取数 / 指数元数据）
+cloudfunctions/get-*/        四个零依赖读取函数
+miniprogram/pages/           index（排行榜）/ detail（详情）/ about（口径说明）
+.github/workflows/daily.yml  每日构建与发布
+prototype/index.html         单文件 HTML 原型，双击可开，数据已内联
+dist/                        构建产物（不入库，由 Actions 推到 data 分支）
 ```
+
+`scripts/*.py` 是 P1 阶段的 Python 管线，已不在链路上，仅 `verify-node-vs-python.js`
+还拿它做等价性参照。
+
+## 许可与免责
+
+数据来自公开市场行情接口，仅供参考，**不构成任何投资建议**。
+不涉及个股、不荐股、不提供买卖建议。
