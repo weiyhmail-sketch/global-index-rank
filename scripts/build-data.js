@@ -18,7 +18,7 @@ const path = require("path");
 const { INDICES, GROUP_NAMES, TIER_NAMES, CURRENCIES } = require("../cloudfunctions/lib/indices.js");
 const { fetchIndex } = require("../cloudfunctions/lib/sources.js");
 const { fetchFX } = require("../cloudfunctions/lib/fx.js");
-const { buildSnapshot } = require("../cloudfunctions/lib/snapshot.js");
+const { buildSnapshot, buildRankDelta } = require("../cloudfunctions/lib/snapshot.js");
 
 const OUT = path.join(__dirname, "..", "dist");
 const ANCHORS = [
@@ -61,7 +61,8 @@ async function pool(items, limit, fn) {
   console.log(`汇率：${Object.keys(fx.rates).length} 种${fx.missing.length ? "，缺失 " + fx.missing.join(",") : ""}`);
 
   const got = INDICES.filter((m) => series[m.code]);
-  const { meta, snapshot, windows } = buildSnapshot(got, series, fx.rates);
+  const { meta, snapshot, windows } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
+  const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS });
   const asofs = meta.map((m) => m.asof).sort();
 
   fs.writeFileSync(fxPath, JSON.stringify(fx));
@@ -70,7 +71,8 @@ async function pool(items, limit, fn) {
     dataAsof: asofs[asofs.length - 1] || null,
     countries: new Set(meta.map((m) => m.country)).size,
     windows, anchors: ANCHORS, groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
-    fxMissing: fx.missing, meta, snapshot,
+    fxMissing: fx.missing, rankDeltaDays: 7,
+    meta, snapshot, rankDelta,
   }));
   fs.writeFileSync(path.join(OUT, "series.json"), JSON.stringify({
     generated: new Date().toISOString(),

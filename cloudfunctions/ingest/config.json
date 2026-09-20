@@ -1,0 +1,14 @@
+{
+  "triggers": [
+    {
+      "name": "dailyIngest",
+      "type": "timer",
+      "config": "0 10 6 * * * *"
+    },
+    {
+      "name": "dailyIngestRetry",
+      "type": "timer",
+      "config": "0 20 6 * * * *"
+    }
+  ]
+}

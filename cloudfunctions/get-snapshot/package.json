@@ -1,0 +1,7 @@
+{
+  "name": "get-snapshot",
+  "version": "1.0.0",
+  "description": "客户端读取排行榜快照",
+  "main": "index.js",
+  "dependencies": { "wx-server-sdk": "~2.6.3" }
+}

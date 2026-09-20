@@ -68,16 +68,25 @@ function makeLevelFn(series, ccy, fxPairs) {
 /**
  * @param seriesByCode { code: {date: close} }
  * @param fxRates      { ccy: {date: rate} }
- * @returns { meta: [...], snapshot: {code: {win: {cur: number|null}}} }
+ * @param opts.endShiftDays 把所有窗口的终点整体往前挪 N 天（用于回溯算历史名次）
+ * @param opts.anchors      事件锚点 [{date,label}]，各自算一档「自该日以来」
+ * @returns { meta, snapshot, windows }
  */
-function buildSnapshot(indices, seriesByCode, fxRates) {
+function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
+  const { endShiftDays = 0, anchors = [] } = opts;
   const fxPairs = Object.fromEntries(Object.entries(fxRates).map(([c, s]) => [c, toPairs(s)]));
   const meta = [], snapshot = {};
 
   for (const m of indices) {
     const raw = seriesByCode[m.code];
     if (!raw || !Object.keys(raw).length) continue;
-    const series = toPairs(raw);
+    let series = toPairs(raw);
+    if (endShiftDays) {
+      // 回溯模式：砍掉终点之后的数据，等价于把"今天"挪到过去某一天
+      const cut = shiftDays(series[series.length - 1][0], endShiftDays);
+      series = series.filter((p) => p[0] <= cut);
+      if (series.length < 2) continue;
+    }
     const asof = series[series.length - 1][0];
     const first = series[0][0];
     const level = makeLevelFn(series, m.ccy, fxPairs);
@@ -95,8 +104,11 @@ function buildSnapshot(indices, seriesByCode, fxRates) {
       y5: minusMonths(asof, 60),
     };
 
+    // 事件锚点与预置窗口同样处理，一并预计算，省得客户端再拉序列
+    for (const a of anchors) starts["anchor:" + a.date] = a.date;
+
     const row = {};
-    for (const [key] of WINDOWS) {
+    for (const key of [...WINDOWS.map((w) => w[0]), ...anchors.map((a) => "anchor:" + a.date)]) {
       const st = starts[key];
       row[key] = {};
       for (const cur of ["local", "usd", "cny"]) {
@@ -118,4 +130,41 @@ function buildSnapshot(indices, seriesByCode, fxRates) {
   return { meta, snapshot, windows: WINDOWS.map(([key, label]) => ({ key, label })) };
 }
 
-module.exports = { buildSnapshot, WINDOWS, at, toPairs, minusMonths, shiftDays };
+/**
+ * 名次变化：同一套口径下，当前名次相对 N 个自然日前的变化。
+ *
+ * 放在构建侧算而不是客户端：客户端要自己算就得下载全部日线序列（1.18 MB），
+ * 而这里只多出几百个小整数。
+ *
+ * 返回 { code: { win: { cur: delta|null } } }，正数表示名次上升。
+ */
+function buildRankDelta(indices, seriesByCode, fxRates, opts = {}) {
+  const { days = 7, anchors = [] } = opts;
+  const now = buildSnapshot(indices, seriesByCode, fxRates, { anchors });
+  const past = buildSnapshot(indices, seriesByCode, fxRates, { anchors, endShiftDays: -days });
+
+  const keys = [...WINDOWS.map((w) => w[0]), ...anchors.map((a) => "anchor:" + a.date)];
+  const rankOf = (snap, win, cur) => {
+    const rows = Object.entries(snap)
+      .map(([code, r]) => ({ code, v: r[win] && r[win][cur] }))
+      .filter((r) => r.v !== null && r.v !== undefined)
+      .sort((a, b) => b.v - a.v);
+    const m = {};
+    rows.forEach((r, i) => (m[r.code] = i + 1));
+    return m;
+  };
+
+  const out = {};
+  for (const win of keys) {
+    for (const cur of ["local", "usd", "cny"]) {
+      const a = rankOf(now.snapshot, win, cur);
+      const b = rankOf(past.snapshot, win, cur);
+      for (const code of Object.keys(a)) {
+        ((out[code] ||= {})[win] ||= {})[cur] = b[code] ? b[code] - a[code] : null;
+      }
+    }
+  }
+  return out;
+}
+
+module.exports = { buildSnapshot, buildRankDelta, WINDOWS, at, toPairs, minusMonths, shiftDays };
