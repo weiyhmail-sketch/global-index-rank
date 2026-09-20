@@ -6,8 +6,13 @@ name: 每日构建指数数据
 
 on:
   schedule:
-    # UTC 22:00 ≈ 北京时间次日 06:00，此时全球主要市场均已收盘
-    - cron: "0 22 * * *"
+    # UTC 22:37 ≈ 北京时间次日 06:37，此时全球主要市场均已收盘。
+    #
+    # 为什么是 37 分而不是整点：GitHub 官方文档明确说 schedule 事件在高负载时
+    # 会被延迟，而「高负载时段包括每个整点」，负载够高时排队的任务会被直接丢弃，
+    # 并建议「schedule your workflow to run at a different time of the hour」。
+    # 原来写的是 0 22，正好踩在整点上。
+    - cron: "37 22 * * *"
   workflow_dispatch:
 
 permissions:
