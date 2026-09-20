@@ -1,0 +1,52 @@
+<view class="wrap">
+  <view wx:if="{{loading}}" class="card hint">加载中…</view>
+  <view wx:elif="{{error}}" class="card hint err">{{error}}</view>
+  <block wx:else>
+
+    <view class="card">
+      <view class="top">
+        <text class="flag">{{flag}}</text>
+        <view class="ttl">
+          <view class="c">{{country}}</view>
+          <view class="n">{{name}}</view>
+        </view>
+        <view class="lv">
+          <view class="lvv">{{level}}</view>
+          <view class="lvd">截至 {{asof}}</view>
+        </view>
+      </view>
+
+      <view class="pickers">
+        <picker mode="selector" range="{{curOptions}}" value="{{curIdx}}" bindchange="onCur">
+          <view class="sel">{{curOptions[curIdx]}}<text class="caret">▾</text></view>
+        </picker>
+        <picker mode="selector" range="{{rangeOptions}}" value="{{rangeIdx}}" bindchange="onRange">
+          <view class="sel">{{rangeOptions[rangeIdx]}}<text class="caret">▾</text></view>
+        </picker>
+        <text class="cstat">{{chartStat}}</text>
+      </view>
+
+      <view wx:if="{{chartLoading}}" class="nocur">加载走势…</view>
+      <view wx:elif="{{noCur}}" class="nocur">该区间无此口径数据</view>
+      <canvas wx:else id="chart" type="2d" class="chart"></canvas>
+      <view wx:if="{{sampleNote}}" class="snote">{{sampleNote}}</view>
+    </view>
+
+    <view class="card">
+      <view class="h">各区间涨幅 · {{curOptions[curIdx]}}口径</view>
+      <view class="grid">
+        <view wx:for="{{wins}}" wx:key="label" class="cell">
+          <view class="cl">{{item.label}}</view>
+          <view class="cv {{item.cls}}">{{item.pct}}</view>
+        </view>
+      </view>
+    </view>
+
+    <view class="card">
+      <view class="meta">{{metaLine}}</view>
+      <view wx:if="{{note}}" class="meta note">{{note}}</view>
+      <view class="meta">价格指数，不含股息。长周期比较会系统性低估高股息市场。</view>
+    </view>
+
+  </block>
+</view>

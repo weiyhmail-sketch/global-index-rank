@@ -265,4 +265,10 @@ Page({
   },
 
   goAbout() { wx.navigateTo({ url: "/pages/about/about" }); },
+
+  goDetail(e) {
+    const code = e.currentTarget.dataset.code;
+    const cur = ["cny", "usd", "local"][this.data.curIdx];
+    wx.navigateTo({ url: `/pages/detail/detail?code=${code}&cur=${cur}` });
+  },
 });

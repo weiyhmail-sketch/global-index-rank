@@ -93,3 +93,5 @@ page { background: #f6f7f9; }
 }
 .marrow { color: #9aa0a8; font-size: 26rpx; }
 .mnote { width: 100%; font-size: 21rpx; color: #9aa0a8; margin-top: 4rpx; }
+
+.dgo { margin-top: 12rpx; font-size: 23rpx; color: #2563eb; }

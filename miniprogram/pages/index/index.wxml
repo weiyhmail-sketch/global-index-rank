@@ -97,6 +97,7 @@
           </view>
           <view class="dmeta">{{detail.meta}}</view>
           <view wx:if="{{detail.note}}" class="dmeta">{{detail.note}}</view>
+          <view class="dgo" catchtap="goDetail" data-code="{{item.code}}">查看走势与各区间涨幅 ›</view>
         </view>
       </block>
       <view wx:if="{{fxNote}}" class="note">{{fxNote}}</view>

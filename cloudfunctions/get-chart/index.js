@@ -25,7 +25,8 @@ exports.main = async (event = {}) => {
         if (cny) cny = cny.slice(i);
       }
     }
-    return { ok: true, ms, bytes, code, ccy: d.ccy, n: dates.length, dates, local, usd, cny };
+    return { ok: true, ms, bytes, code, ccy: d.ccy, n: dates.length,
+             dailyFrom: d.dailyFrom, dates, local, usd, cny };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };
   }

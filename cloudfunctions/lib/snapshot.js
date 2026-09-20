@@ -272,6 +272,17 @@ function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
  *
  * @returns { dates: [...], local: [...], usd: [...], cny: [...] }
  */
+/** ISO 周键，用于按周降采样。 */
+function isoWeek(iso) {
+  const d = new Date(iso + "T00:00:00Z");
+  const day = (d.getUTCDay() + 6) % 7;            // 周一为 0
+  d.setUTCDate(d.getUTCDate() - day + 3);         // 移到本周四
+  const y = d.getUTCFullYear();
+  const jan4 = new Date(Date.UTC(y, 0, 4));
+  const w = 1 + Math.round(((d - jan4) / 86400000 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7);
+  return y + "-" + w;
+}
+
 function buildChart(meta, series, fxPairs, opts = {}) {
   const { years = 5 } = opts;
   const pairs = toPairs(series);
@@ -279,8 +290,24 @@ function buildChart(meta, series, fxPairs, opts = {}) {
   const rows = pairs.filter((p) => p[0] >= cutoff);
   const level = makeLevelFn(pairs, meta.ccy, fxPairs);
 
-  const out = { dates: [], local: [], usd: [], cny: [] };
-  for (const [d] of rows) {
+  // 近 1 年保留每日，更早改为每周采样。
+  //
+  // 全量 5 年约 1255 点 / 52 KB，云函数取它会超时（实测 SPX 全量 timeout，
+  // 181 点 2.2 秒通过）。降采样后 5 年约 460 点，各区间都能稳过。
+  // 图表是视觉呈现，周采样在这个尺度上肉眼无差别；涨幅计算另有日线口径，
+  // 不受影响。界面上会注明长区间为周采样。
+  const dailyFrom = minusMonths(pairs[pairs.length - 1][0], 12);
+  const kept = [];
+  let lastWeek = "";
+  for (const r of rows) {
+    if (r[0] >= dailyFrom) { kept.push(r); continue; }
+    const wk = isoWeek(r[0]);
+    if (wk !== lastWeek) { lastWeek = wk; kept.push(r); }
+    else kept[kept.length - 1] = r;   // 同周取最后一个交易日
+  }
+
+  const out = { dates: [], local: [], usd: [], cny: [], dailyFrom };
+  for (const [d] of kept) {
     out.dates.push(d);
     for (const cur of ["local", "usd", "cny"]) {
       const v = level(d, cur);
