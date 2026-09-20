@@ -96,3 +96,10 @@ page { background: #f6f7f9; }
 .mnote { width: 100%; font-size: 21rpx; color: #9aa0a8; margin-top: 4rpx; }
 
 .dgo { margin-top: 12rpx; font-size: 23rpx; color: #2563eb; }
+
+.stale { font-size: 22rpx; color: #b45309; margin-top: 6rpx; }
+.sechd {
+  font-size: 21rpx; color: #6b7280; line-height: 1.6;
+  padding: 20rpx 0 10rpx; border-top: 1rpx solid #e6e8ec; margin-top: 10rpx;
+}
+.row.dim { opacity: .72; }

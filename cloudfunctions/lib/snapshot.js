@@ -5,8 +5,17 @@
  *  - 外币换算按端点各自对应日期的汇率：level_usd = level_local / fx[ccy]
  *  - 数据起点晚于区间起点 → 返回 null，绝不拿首日数据充数
  */
+// 区间起点允许向前回溯的最大自然日数。
+//
+// 超过则该窗口返回 null（显示「—」）。10 天覆盖了所有正常长假
+// （A 股国庆 8 天、农历新年约 9 天），又能挡住数据源悄悄降级：
+// 巴基斯坦 2021-2022 是月频数据，「近3年」的起点曾回溯 17 天而无人察觉。
+// 不用「N 个交易日」作阈值——正是交易日序列本身不可信时才需要这道检查。
+const MAX_BACKTRACK_DAYS = 10;
+
 const WINDOWS = [
-  ["d1", "今日"], ["w1", "近1周"], ["m1", "近1月"], ["m3", "近3月"],
+  // 「今日」是事实错误的标签：各国收盘时点不同，长假后它还是跨假期的累计涨幅
+  ["d1", "最近交易日"], ["w1", "近1周"], ["m1", "近1月"], ["m3", "近3月"],
   ["ytd", "今年以来"], ["y1", "近1年"], ["y3", "近3年"], ["y5", "近5年"],
 ];
 
@@ -74,7 +83,12 @@ function makeLevelFn(series, ccy, fxPairs) {
  */
 function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
   const { endShiftDays = 0, anchors = [] } = opts;
-  const fxPairs = Object.fromEntries(Object.entries(fxRates).map(([c, s]) => [c, toPairs(s)]));
+  // 空序列的货币直接剔除：留着它们会让下游每一处 at()/fxPairs[c][0] 都要判空，
+  // 而 canFx 的语义本来就是「这个货币有可用汇率」。
+  const fxPairs = Object.fromEntries(
+    Object.entries(fxRates)
+      .map(([c, s]) => [c, toPairs(s)])
+      .filter(([, a]) => a.length));
   // 汇率表整体起点：多数货币共同的最早日期
   const fxBaseline = Object.values(fxPairs).map((a) => a[0][0]).sort()[0] || "";
   const meta = [], snapshot = {};
@@ -109,17 +123,37 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
     // 事件锚点与预置窗口同样处理，一并预计算，省得客户端再拉序列
     for (const a of anchors) starts["anchor:" + a.date] = a.date;
 
-    const row = {};
+    const row = {}, spans = {};
     for (const key of [...WINDOWS.map((w) => w[0]), ...anchors.map((a) => "anchor:" + a.date)]) {
       const st = starts[key];
       row[key] = {};
+
+      // 端点回溯超限 → 整个窗口不可得。起点落在很久以前的一个交易日上，
+      // 算出来的数字看着正常但对不上标签所承诺的区间。
+      let tooFar = false;
+      if (st && st >= first) {
+        const pt = at(series, st);
+        if (pt) {
+          const back = Math.round(
+            (new Date(st + "T00:00:00Z") - new Date(pt[0] + "T00:00:00Z")) / 86400000);
+          if (back > MAX_BACKTRACK_DAYS) tooFar = true;
+          else spans[key] = back;
+        }
+      }
+
       for (const cur of ["local", "usd", "cny"]) {
         // 数据起点晚于窗口起点 → 不可得，显示「—」而非用首日充数
-        if (!st || st < first) { row[key][cur] = null; continue; }
+        if (!st || st < first || tooFar) { row[key][cur] = null; continue; }
         const a = level(st, cur), b = level(asof, cur);
         row[key][cur] = (a && b) ? Math.round((b / a - 1) * 10000) / 100 : null;
       }
     }
+
+    // 「最近一个交易日」实际跨了几天。长假后它是一个跨假期的累计涨幅
+    // （2024-10-08 创业板的「今日」是 +17.25%），客户端需要如实标注。
+    const d1Span = prevTradingDay
+      ? Math.round((new Date(asof + "T00:00:00Z") - new Date(prevTradingDay + "T00:00:00Z")) / 86400000)
+      : null;
 
     snapshot[m.code] = row;
 
@@ -144,10 +178,31 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       code: m.code, name: m.name, country: m.country, flag: m.flag,
       group: m.group, tier: m.tier, ccy: m.ccy, source: `sina-${m.src}`,
       asof, start: first, level: Math.round(series[series.length - 1][1] * 100) / 100,
-      canFx, fxFrom, fxReason, note: m.note || null,
+      canFx, fxFrom, fxReason, d1Span, note: m.note || null,
     });
   }
-  return { meta, snapshot, windows: WINDOWS.map(([key, label]) => ({ key, label })) };
+  // 每个窗口的典型天数与可比市场数。
+  //   days  —— 客户端据此决定是否提示股息口径（按区间长度而非窗口名，
+  //            否则默认的「今年以来」会漏掉提示）
+  //   n     —— 可比市场数，用于「近5年（5 个市场）」这类标注；
+  //            只有 2 个观测值的中位数不该和 33 个的长得一样
+  const refAsof = meta.map((m) => m.asof).sort().pop() || "";
+  const winMeta = [...WINDOWS.map(([key, label]) => ({ key, label })),
+                   ...anchors.map((a) => ({ key: "anchor:" + a.date, label: a.label + "以来" }))];
+  for (const w of winMeta) {
+    const st = w.key.startsWith("anchor:") ? w.key.slice(7)
+      : { d1: refAsof, w1: shiftDays(refAsof, -7), m1: minusMonths(refAsof, 1),
+          m3: minusMonths(refAsof, 3), ytd: `${+refAsof.slice(0, 4) - 1}-12-31`,
+          y1: minusMonths(refAsof, 12), y3: minusMonths(refAsof, 36),
+          y5: minusMonths(refAsof, 60) }[w.key];
+    w.days = st && refAsof
+      ? Math.round((new Date(refAsof + "T00:00:00Z") - new Date(st + "T00:00:00Z")) / 86400000)
+      : null;
+    w.n = Object.values(snapshot).filter((r) => r[w.key] && r[w.key].local !== null).length;
+  }
+
+  return { meta, snapshot, windows: winMeta.filter((w) => !w.key.startsWith("anchor:")),
+           anchorMeta: winMeta.filter((w) => w.key.startsWith("anchor:")) };
 }
 
 /**
@@ -179,8 +234,17 @@ function buildRankDelta(indices, seriesByCode, fxRates, opts = {}) {
     for (const cur of ["local", "usd", "cny"]) {
       const a = rankOf(now.snapshot, win, cur);
       const b = rankOf(past.snapshot, win, cur);
-      for (const code of Object.keys(a)) {
-        ((out[code] ||= {})[win] ||= {})[cur] = b[code] ? b[code] - a[code] : null;
+      // 只在两次都参与排名的市场之间比名次。
+      // 若某个指数的数据起点恰好跨过 3 年/5 年边界，参与池会变，
+      // 所有人的名次整体平移一位，而 Δ 会把这个平移显示成真实的名次变化。
+      const both = Object.keys(a).filter((c) => b[c] !== undefined);
+      const rerank = (m) => {
+        const rows = both.map((c) => ({ c, r: m[c] })).sort((x, y) => x.r - y.r);
+        const o = {}; rows.forEach((x, i) => (o[x.c] = i + 1)); return o;
+      };
+      const A = rerank(a), B = rerank(b);
+      for (const code of both) {
+        ((out[code] ||= {})[win] ||= {})[cur] = B[code] - A[code];
       }
     }
   }
@@ -287,7 +351,10 @@ function buildChart(meta, series, fxPairs, opts = {}) {
   const { years = 5 } = opts;
   const pairs = toPairs(series);
   const cutoff = minusMonths(pairs[pairs.length - 1][0], years * 12);
-  const rows = pairs.filter((p) => p[0] >= cutoff);
+  // 多留一个 cutoff 之前的点：预置区间的基准是「该日或之前最近一个交易日」，
+  // 若文件里没有这个点，图表就只能退而用区间内第一个点，与榜单对不上。
+  const firstIdx = pairs.findIndex((p) => p[0] >= cutoff);
+  const rows = pairs.slice(firstIdx > 0 ? firstIdx - 1 : 0);
   const level = makeLevelFn(pairs, meta.ccy, fxPairs);
 
   // 近 1 年保留每日，更早改为每周采样。

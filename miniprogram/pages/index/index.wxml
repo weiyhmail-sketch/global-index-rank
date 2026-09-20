@@ -3,6 +3,7 @@
   <view class="hd">
     <view class="title">全球股市涨幅排行</view>
     <view class="sub">{{sub}}</view>
+    <view wx:if="{{staleNote}}" class="stale">⚠️ {{staleNote}}</view>
   </view>
 
   <!-- 吸顶筛选：原型上四行 chip 占首屏 37%，压成单行后降到 6% -->
@@ -100,7 +101,35 @@
           <view class="dgo" catchtap="goDetail" data-code="{{item.code}}">查看走势与各区间涨幅 ›</view>
         </view>
       </block>
-      <view wx:if="{{fxNote}}" class="note">{{fxNote}}</view>
+      <!-- 口径不完整的市场：展示但不参与排名，避免把两种量纲混进同一个排序 -->
+      <block wx:if="{{fbRows.length}}">
+        <view class="sechd">{{fxNote}}</view>
+        <view wx:for="{{fbRows}}" wx:key="code" class="row dim" bindtap="onTapRow" data-code="{{item.code}}">
+          <view class="rk">—</view>
+          <view class="nm">
+            <text class="flag">{{item.flag}}</text>
+            <text class="country">{{item.country}}</text>
+            <text class="idx">{{item.name}}{{item.asofTag}}</text>
+          </view>
+          <view class="pc {{item.cls}}">{{item.pct}}</view>
+          <view class="bar-cell"></view>
+        </view>
+      </block>
+
+      <block wx:if="{{naRows.length}}">
+        <view class="sechd">以下 {{naRows.length}} 个市场在本区间数据不足</view>
+        <view wx:for="{{naRows}}" wx:key="code" class="row dim">
+          <view class="rk">—</view>
+          <view class="nm">
+            <text class="flag">{{item.flag}}</text>
+            <text class="country">{{item.country}}</text>
+            <text class="idx">{{item.name}}（数据自 {{item.start}} 起）</text>
+          </view>
+          <view class="pc na">—</view>
+          <view class="bar-cell"></view>
+        </view>
+      </block>
+
       <view wx:if="{{divNote}}" class="note">{{divNote}}</view>
     </view>
 

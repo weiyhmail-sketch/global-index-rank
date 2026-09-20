@@ -60,8 +60,41 @@ async function pool(items, limit, fn) {
   const fx = await fetchFX(CURRENCIES, end, prevFx);
   console.log(`汇率：${Object.keys(fx.rates).length} 种${fx.missing.length ? "，缺失 " + fx.missing.join(",") : ""}`);
 
+  // A6：频率校验。抓到不等于抓对——新浪对巴基斯坦 KSE100 在 2023-11 之前
+  // 每月只给一条，混进日频榜单后「近3年」的起点会偏 17 天，而且它当时就是榜首。
+  // 完整年份（非首尾年）观测数低于 180 条即判为非日频，把该指数的历史
+  // 截断到日频开始那天，让更早的窗口显示「—」。
+  const SPARSE_THRESHOLD = 180;
+  const freqNotes = [];
+  for (const m of INDICES) {
+    const raw = series[m.code];
+    if (!raw) continue;
+    const ks = Object.keys(raw).sort();
+    const byYear = {};
+    ks.forEach((d) => (byYear[d.slice(0, 4)] = (byYear[d.slice(0, 4)] || 0) + 1));
+    const years = Object.keys(byYear).sort();
+    if (years.length < 3) continue;
+    // 从后往前找第一个稀疏的完整年份，其后一年的年初即为日频起点
+    let cutYear = null;
+    for (let i = years.length - 2; i >= 1; i--) {
+      if (byYear[years[i]] < SPARSE_THRESHOLD) { cutYear = years[i]; break; }
+    }
+    if (!cutYear) continue;
+    // 截到该稀疏年之后第一个观测密度正常的日期
+    const after = ks.filter((d) => d.slice(0, 4) > cutYear);
+    if (!after.length) continue;
+    const cut = after[0];
+    const dropped = ks.filter((d) => d < cut).length;
+    series[m.code] = Object.fromEntries(ks.filter((d) => d >= cut).map((d) => [d, raw[d]]));
+    freqNotes.push(`${m.country} ${m.name}: ${cutYear} 年及以前为月频（每年 ${byYear[cutYear]} 条），已截断，丢弃 ${dropped} 条，日频自 ${cut} 起`);
+  }
+  if (freqNotes.length) {
+    console.log("\n频率校验：");
+    freqNotes.forEach((n) => console.log("  ⚠️ " + n));
+  }
+
   const got = INDICES.filter((m) => series[m.code]);
-  const { meta, snapshot, windows } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
+  const { meta, snapshot, windows, anchorMeta } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
   const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS });
   const monthly = buildMonthly(got, series, fx.rates, { years: 6 });
   const yearly = buildYearly(monthly, { years: 6 });
@@ -72,7 +105,11 @@ async function pool(items, limit, fn) {
     generated: new Date().toISOString(),
     dataAsof: asofs[asofs.length - 1] || null,
     countries: new Set(meta.map((m) => m.country)).size,
-    windows, anchors: ANCHORS, groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
+    windows, anchors: ANCHORS.map((a) => {
+      const am = anchorMeta.find((x) => x.key === "anchor:" + a.date) || {};
+      return { ...a, days: am.days, n: am.n };
+    }),
+    fxStale: fx.fxStale || [], groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
     fxMissing: fx.missing, rankDeltaDays: 7,
     meta, snapshot, rankDelta, yearly,
   }));
@@ -122,6 +159,22 @@ async function pool(items, limit, fn) {
     console.log("\n失败明细：");
     failed.forEach((f) => console.log(`  ${f.code} (${f.src}/${f.sym}): ${f.err}`));
   }
-  // 全挂才算失败；个别源抖动不应阻断每日更新
+  // 与上一轮比对指数数量。
+  //
+  // 「全挂才失败」太宽松：单个指数抓取失败会被静默过滤掉，快照里直接少一行，
+  // 副标题的国家数跟着变，没有任何人会注意到。拿上一轮的产物比一下最便宜。
+  const prevSnapPath = path.join(OUT, "prev-snapshot.json");
+  if (fs.existsSync(prevSnapPath)) {
+    try {
+      const prev = JSON.parse(fs.readFileSync(prevSnapPath, "utf8"));
+      if (prev.meta && prev.meta.length > meta.length) {
+        const lost = prev.meta.filter((a) => !meta.some((b) => b.code === a.code));
+        console.error(`\n❌ 指数数量下降：${prev.meta.length} → ${meta.length}`);
+        lost.forEach((m) => console.error(`   丢失 ${m.flag} ${m.country} ${m.name} (${m.code})`));
+        process.exit(1);
+      }
+    } catch (e) { /* 上一轮产物损坏则跳过比对 */ }
+  }
+
   if (meta.length === 0) process.exit(1);
 })();

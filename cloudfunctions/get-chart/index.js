@@ -15,9 +15,15 @@ exports.main = async (event = {}) => {
   try {
     const { data: d, ms, bytes } = await fetchJSON(`chart/${code}.json`);
     let { dates, local, usd, cny } = d;
+    let truncated = false;
     // from 可选：只回传需要的区间，减小体积
     if (event.from) {
-      const i = dates.findIndex((x) => x >= event.from);
+      // 取「from 当天或之前最近的那个点」作为起点，与 snapshot.js 的 at() 同一语义。
+      // 用 findIndex(x => x >= from) 会取到区间内第一个点，方向相反，
+      // 实测会让图表标题与榜单格子差到 40 个百分点。
+      let i = -1;
+      for (let k = 0; k < dates.length; k++) { if (dates[k] <= event.from) i = k; else break; }
+      truncated = i < 0;               // from 早于全部数据
       if (i > 0) {
         dates = dates.slice(i);
         local = local.slice(i);
@@ -26,7 +32,7 @@ exports.main = async (event = {}) => {
       }
     }
     return { ok: true, ms, bytes, code, ccy: d.ccy, n: dates.length,
-             dailyFrom: d.dailyFrom, dates, local, usd, cny };
+             dailyFrom: d.dailyFrom, truncated, dates, local, usd, cny };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };
   }

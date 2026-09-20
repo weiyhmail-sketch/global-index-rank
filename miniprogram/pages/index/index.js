@@ -30,7 +30,7 @@ Page({
     winOptions: [], curOptions: CURS.map((c) => c.label),
     tierOptions: TIERS.map((t) => t.label), grpOptions: [],
     // 展示数据
-    sub: "", ledeHead: "", top: null, bottom: null, stats: "", moves: [],
+    sub: "", staleNote: "", ledeHead: "", rankedCount: 0, fbRows: [], naRows: [], top: null, bottom: null, stats: "", moves: [],
     rows: [], naCount: 0, expanded: "", detail: null,
     fxNote: "", divNote: "",
     // 自定义月度区间
@@ -69,6 +69,8 @@ Page({
         grpOptions: this.grps.map((g) => g.label),
         winIdx: ytd < 0 ? 0 : ytd,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
+        // 构建侧算了新鲜度却没人读，等于白算
+        staleNote: d.stale || "",
         loading: false,
       });
       this.render();
@@ -113,8 +115,19 @@ Page({
     }
   },
 
-  onM0(e) { this.setData({ m0Idx: +e.detail.value, expanded: "" }); this.render(); },
-  onM1(e) { this.setData({ m1Idx: +e.detail.value, expanded: "" }); this.render(); },
+  // 两个 picker 看起来对称，很容易选反。选反后 b/a-1 照样出榜，
+  // 印度今年以来 -21.83% 倒过来就成了 +27.92% 的第一名。
+  onM0(e) {
+    const i = +e.detail.value;
+    const j = Math.max(i + 1, this.data.m1Idx);
+    this.setData({ m0Idx: i, m1Idx: Math.min(j, this.data.monthOptions.length - 1), expanded: "" });
+    this.render();
+  },
+  onM1(e) {
+    const j = +e.detail.value;
+    this.setData({ m1Idx: j, m0Idx: Math.min(this.data.m0Idx, j - 1), expanded: "" });
+    this.render();
+  },
   onCur(e) { this.setData({ curIdx: +e.detail.value, expanded: "" }); this.render(); },
   onTier(e) { this.setData({ tierIdx: +e.detail.value, expanded: "" }); this.render(); },
   onGrp(e) { this.setData({ grpIdx: +e.detail.value, expanded: "" }); this.render(); },
@@ -161,21 +174,28 @@ Page({
       return (loc !== null && loc !== undefined) ? { v: loc, fb: true } : { v: null, fb: false };
     };
 
+    // 三分而非二分。
+    //
+    // 口径不完整的行(fb)绝不能与完整行一起排序：排序是跨行比较，要求同一度量，
+    // 而退回的原币值是另一个量纲。更糟的是这个偏差是单边的——缺汇率的恰恰是
+    // 货币在贬值的新兴市场，原币数必然偏高、必然浮到榜首。
+    // 实测：修此问题前，「近3年·人民币」榜的前三名全部不是人民币。
     const all = pool.map((m) => ({ m, ...val(m.code) }));
-    const ok = all.filter((r) => r.v !== null).sort((a, b) => b.v - a.v);
+    const ok = all.filter((r) => r.v !== null && !r.fb).sort((a, b) => b.v - a.v);
+    const fb = all.filter((r) => r.v !== null && r.fb).sort((a, b) => b.v - a.v);
     const na = all.filter((r) => r.v === null);
     const max = Math.max(1, ...ok.map((r) => Math.abs(r.v)));
 
     const fmt = (v) => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
     const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
 
-    const rows = ok.concat(na).map((r, i) => {
+    const mkRows = (list, ranked) => list.map((r, i) => {
       // 自定义区间没有预计算的名次变化，不显示角标
       const dl = custom ? null : ((d.rankDelta || {})[r.m.code] || {})[win];
       const delta = dl ? dl[cur] : null;
       return {
         code: r.m.code, flag: r.m.flag, country: r.m.country, name: r.m.name,
-        rank: r.v === null ? "" : String(i + 1),
+        rank: ranked && r.v !== null ? String(i + 1) : "",
         pct: r.v === null ? "—" : fmt(r.v) + (r.fb ? " *" : ""),
         cls: r.v === null ? "na" : cls(r.v),
         barW: r.v === null ? 0 : Math.abs(r.v) / max * 50,
@@ -183,9 +203,16 @@ Page({
         delta: (delta === null || delta === undefined || delta === 0) ? ""
           : (delta > 0 ? "↑" : "↓") + Math.abs(delta),
         deltaCls: delta > 0 ? "up" : "down",
-        asofTag: r.m.asof !== this.baseAsof ? " · 截至" + r.m.asof.slice(5) : "",
+        start: r.m.start,
+        asofTag: (r.m.asof !== this.baseAsof ? " · 截至" + r.m.asof.slice(5) : "")
+          // 长假后「最近交易日」是跨假期的累计涨幅，如实标注
+          + (win === "d1" && r.m.d1Span > 4 ? ` · 跨${r.m.d1Span}天` : ""),
       };
     });
+
+    const rows = mkRows(ok, true);
+    const fbRows = mkRows(fb, false);
+    const naRows = mkRows(na, false);
 
     // 结论条
     const line = (r) => r && {
@@ -195,29 +222,52 @@ Page({
     let stats = "", moves = [];
     if (ok.length) {
       const up = ok.filter((r) => r.v > 0).length;
+      const down = ok.filter((r) => r.v < 0).length;
+      const flat = ok.length - up - down;          // 平盘不该被算进下跌
       const sorted = ok.map((r) => r.v).slice().sort((a, b) => a - b);
       const mid = sorted.length % 2 ? sorted[(sorted.length - 1) / 2]
         : (sorted[sorted.length / 2 - 1] + sorted[sorted.length / 2]) / 2;
-      stats = `${up} 涨 ${ok.length - up} 跌 · 中位数 ${fmt(mid)}`
-        + (na.length ? ` · ${na.length} 个数据不足` : "");
-      moves = rows.filter((r) => r.delta).slice(0, 4)
-        .sort((a, b) => Math.abs(+b.delta.slice(1)) - Math.abs(+a.delta.slice(1))).slice(0, 4);
+
+      // 样本太少时不给中位数：两个观测值的中位数和 33 个的长得一样，
+      // 但它不是同一种东西。改为直说有几个市场可比。
+      stats = ok.length < 8
+        ? `仅 ${ok.length} 个市场在本区间有可比数据`
+        : `${up} 涨 ${down} 跌${flat ? ` ${flat} 平` : ""} · 中位数 ${fmt(mid)}`;
+      const tail = [];
+      if (fb.length) tail.push(`${fb.length} 个仅原币`);
+      if (na.length) tail.push(`${na.length} 个数据不足`);
+      if (tail.length) stats += " · " + tail.join(" · ");
+
+      // 先排序再截取。写反了会永远展示榜单前段那几个最无聊的 ±1。
+      moves = rows.filter((r) => r.delta)
+        .sort((a, b) => Math.abs(+b.delta.slice(1)) - Math.abs(+a.delta.slice(1)))
+        .slice(0, 4);
     }
 
-    const fbNames = all.filter((r) => r.fb).map((r) => r.m.name);
-    const isLong = custom
-      ? (this.monthly.months[this.data.m1Idx].slice(0, 4) !== this.monthly.months[this.data.m0Idx].slice(0, 4))
-      : (["y1", "y3", "y5"].includes(win) || win.startsWith("anchor:"));
+    // 股息提示按区间长度判定，而不是按窗口名——按名字判会漏掉默认的
+    // 「今年以来」（8.7 个月，英国按 4%/年算已是约 2.9pt 的系统性低估）。
+    const winRec = custom ? null
+      : (d.windows.find((w) => w.key === win)
+         || (d.anchors || []).map((a) => ({ key: "anchor:" + a.date, days: a.days }))
+              .find((w) => w.key === win));
+    const spanDays = custom
+      ? (this.data.m1Idx - this.data.m0Idx) * 30
+      : (winRec && winRec.days) || 0;
+    const isLong = spanDays >= 90;
     const winLabel = custom
       ? `${this.monthly.months[this.data.m0Idx]} 月末 → ${this.monthly.months[this.data.m1Idx]}`
       : (winMeta ? winMeta.label : "");
 
     this.setData({
-      ledeHead: `${winLabel} · ${CURS[this.data.curIdx].label}口径`,
+      ledeHead: `${winLabel} · ${CURS[this.data.curIdx].label}口径 · ${ok.length} 个市场参与排名`,
       top: ok.length ? line(ok[0]) : null,
       bottom: ok.length > 1 ? line(ok[ok.length - 1]) : null,
-      stats, moves, rows, naCount: na.length,
-      fxNote: fbNames.length ? `${fbNames.join("、")}：该区间无可用汇率，表中为原币涨幅（标 *），仍参与排名。` : "",
+      stats, moves, rows, fbRows, naRows, naCount: na.length,
+      rankedCount: ok.length,
+      // 说明必须紧挨着受影响的行，不能丢在 33 行之后
+      fxNote: fb.length
+        ? `以下 ${fb.length} 个市场在本区间无可用汇率，仅列原币涨幅，不参与排名：`
+        : "",
       divNote: isLong ? "长周期未计入股息。高股息市场（英国约 4%/年、日本约 2%/年）会被系统性低估。" : "",
     });
   },

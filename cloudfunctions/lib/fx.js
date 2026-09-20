@@ -11,7 +11,8 @@
 const { get, retry } = require("./http");
 
 const START = "2015-01-01";
-const STALE_DAYS = 30;
+const STALE_DAYS = 30;        // 超过则判定主源停更，整个剔除
+const SOFT_STALE_DAYS = 7;    // 超过则标记为陈旧，界面退回原币口径
 const CCY_API_START = "2024-03-20";
 
 const iso = (d) => d.toISOString().slice(0, 10);
@@ -21,8 +22,7 @@ const shiftDays = (isoDate, n) => {
   return iso(d);
 };
 const END_EQ = (end) => shiftDays(end, -7);
-// 无法区分某币种此前来自哪个源，统一按"最后日期距今超过 3 天"判为需要补
-const prevHadFrankfurter = () => false;
+
 const daysBetween = (a, b) =>
   Math.round((new Date(b + "T00:00:00Z") - new Date(a + "T00:00:00Z")) / 86400000);
 
@@ -72,7 +72,12 @@ async function fetchFX(currencies, end, prev = null) {
   // 已有数据先继承下来，后面只补缺口
   let fromDate = START;
   if (prev && Object.keys(prev).length) {
-    for (const [c, s] of Object.entries(prev)) if (s && Object.keys(s).length) rates[c] = { ...s };
+    // 只继承当前指数池真正用得到的币种：无条件全盘继承会让废弃币种
+    // 永久滞留（实测 30 种里 10 种无人使用、文件白胖 40%），
+    // 而且它们会参与决定 fxBaseline，进而影响 fxReason 的判定。
+    for (const [c, s] of Object.entries(prev)) {
+      if (need.has(c) && s && Object.keys(s).length) rates[c] = { ...s };
+    }
     const lasts = Object.values(rates).map((s) => Object.keys(s).sort().pop()).filter(Boolean);
     if (lasts.length) {
       // 从最早的那个"最后日期"往前一周开始补，容忍各币种进度不齐
@@ -94,21 +99,45 @@ async function fetchFX(currencies, end, prev = null) {
     if (daysBetween(last, end) > STALE_DAYS) delete rates[c];
   }
 
-  const rest = [...need].filter((c) => !rates[c] || !Object.keys(rates[c]).length);
-  // 已有数据的币种只补它自己的增量；全新的币种才从头回补
+  // 交给备源的两类：
+  //   fresh   —— 完全没有数据，从 currency-api 起点全量回补
+  //   partial —— 有数据但主源推不动它（欧洲央行不发布这些币种），只补增量
+  //
+  // partial 这条以前算出来却从未被引用，后果是 TWD/VND/PKR/EGP/RUB
+  // 在首次构建后再也不更新，直到 30 天后被停更检查整个删掉、
+  // 触发一次 950 次请求的全量回补，然后循环。期间界面用的是最多 30 天前的
+  // 终点汇率配正确的起点汇率，canFx 仍为 true，没有任何提示。
+  const fresh = [...need].filter((c) => !rates[c] || !Object.keys(rates[c]).length);
   const partial = [...need].filter((c) => rates[c] && Object.keys(rates[c]).length
-    && daysBetween(Object.keys(rates[c]).sort().pop(), end) > 3
-    && !prevHadFrankfurter(rates[c]));
-  if (rest.length) {
+    && daysBetween(Object.keys(rates[c]).sort().pop(), end) > 1);
+
+  const toBackfill = [...fresh, ...partial];
+  if (toBackfill.length) {
+    // 一次拉到最早的那个缺口起点，再按币种合并；partial 只有几天的量
+    const froms = toBackfill.map((c) => fresh.includes(c)
+      ? CCY_API_START
+      : shiftDays(Object.keys(rates[c]).sort().pop(), -3));
+    const from = froms.sort()[0];
     try {
-      const got = await fromCurrencyApi(rest, end, 10, CCY_API_START);
-      for (const c of rest) {
-        if (got[c] && Object.keys(got[c]).length) rates[c] = got[c];
-        else missing.push(c);
+      const got = await fromCurrencyApi(toBackfill, end, 10, from);
+      for (const c of toBackfill) {
+        if (got[c] && Object.keys(got[c]).length) {
+          rates[c] = { ...(rates[c] || {}), ...got[c] };
+        } else if (fresh.includes(c)) {
+          missing.push(c);
+        }
       }
-    } catch (e) { missing.push(...rest); }
+    } catch (e) { missing.push(...fresh); }
   }
-  return { rates, missing: [...new Set(missing)].sort() };
+
+  // A2 的配套：即使增量再断一次，也要让界面诚实地退回原币而不是
+  // 拿陈旧汇率算出一个看起来正常的数。>7 天打标记，>30 天才整个删除。
+  const fxStale = [];
+  for (const c of Object.keys(rates)) {
+    const lag = daysBetween(Object.keys(rates[c]).sort().pop(), end);
+    if (lag > SOFT_STALE_DAYS) fxStale.push({ ccy: c, lag });
+  }
+  return { rates, missing: [...new Set(missing)].sort(), fxStale };
 }
 
 module.exports = { fetchFX };

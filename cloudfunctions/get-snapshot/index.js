@@ -19,7 +19,7 @@ exports.main = async (event = {}) => {
     if (event.metaOnly) return { ...base, indices: (d.meta || []).length, fxMissing: d.fxMissing };
     return {
       ...base,
-      windows: d.windows, anchors: d.anchors, groupNames: d.groupNames,
+      windows: d.windows, anchors: d.anchors, fxStale: d.fxStale, groupNames: d.groupNames,
       tierNames: d.tierNames, fxMissing: d.fxMissing,
       meta: d.meta, snapshot: d.snapshot, rankDelta: d.rankDelta, yearly: d.yearly,
     };

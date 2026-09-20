@@ -19,7 +19,19 @@
   </view>
   <view class="sec">
     <view class="h">名次变化</view>
-    <view class="p">「↑2」表示该市场在当前口径与区间下，名次较 7 个自然日前上升 2 位。</view>
+    <view class="p">「↑2」表示该市场在<text class="b">与 7 个自然日前的同名榜单相比</text>上升了 2 位。对「今年以来」这类起点固定的区间，它就是通常理解的名次变化；对「近1月」这类滚动区间，两次比较的是两个不同的时间窗，读作「一周前如果看近1月榜，它在哪个位置」。</view>
+  </view>
+  <view class="sec">
+    <view class="h">口径不完整的市场</view>
+    <view class="p">部分市场在较早区间没有可用汇率。这些行<text class="b">不参与排名</text>，单独列在榜单下方并标 <text class="b">*</text>，只给原币涨幅。排序是跨市场比较，要求所有行在同一计价口径下；把原币值混进人民币榜会系统性偏高——缺汇率的往往正是货币在贬值的新兴市场。</view>
+  </view>
+  <view class="sec">
+    <view class="h">最近交易日</view>
+    <view class="p">各国收盘时点不同，不存在统一的「今日」，因此这一档叫「最近交易日」。长假之后它是一个跨假期的累计涨幅，此时行内会标注「跨 N 天」。</view>
+  </view>
+  <view class="sec">
+    <view class="h">颜色约定</view>
+    <view class="p">本表采用中国习惯：<text class="b">红涨绿跌</text>。涨跌方向同时由 +/− 前缀与色条方向表达，不依赖颜色也能读懂。</view>
   </view>
   <view class="sec">
     <view class="h">榜单分层</view>

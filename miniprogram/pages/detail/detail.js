@@ -11,12 +11,15 @@ const CURS = [
   { key: "usd", label: "美元" },
   { key: "local", label: "原币种" },
 ];
+// winKey 指向快照里的同名窗口。图表标题直接读快照，不自己算——
+// 自己算会与正下方的「各区间涨幅」格子打架（实测最大差 40.49 个百分点），
+// 因为两者的起点取法方向相反，而且图表对一年前的数据做了周采样。
 const RANGES = [
-  { key: "1m", label: "近1月", months: 1 },
-  { key: "3m", label: "近3月", months: 3 },
-  { key: "1y", label: "近1年", months: 12 },
-  { key: "3y", label: "近3年", months: 36 },
-  { key: "5y", label: "近5年", months: 60 },
+  { key: "1m", label: "近1月", months: 1,  winKey: "m1" },
+  { key: "3m", label: "近3月", months: 3,  winKey: "m3" },
+  { key: "1y", label: "近1年", months: 12, winKey: "y1" },
+  { key: "3y", label: "近3年", months: 36, winKey: "y3" },
+  { key: "5y", label: "近5年", months: 60, winKey: "y5" },
 ];
 
 function minusMonths(iso, n) {
@@ -98,9 +101,16 @@ Page({
   onCur(e) { this.setData({ curIdx: +e.detail.value }); this.render(); },
 
   async onRange(e) {
-    this.setData({ rangeIdx: +e.detail.value });
+    // 先取数、成功后再切标签。反过来的话一旦取数失败，
+    // 新标签会挂着旧区间的曲线，之后任何一次 onCur 都会把这个错配渲染出来。
+    const prev = this.data.rangeIdx;
+    const next = +e.detail.value;
+    this.setData({ rangeIdx: next });
     try { await this.loadChart(); this.render(); }
-    catch (err) { this.setData({ chartStat: "走势数据获取失败", noCur: true }); }
+    catch (err) {
+      this.setData({ rangeIdx: prev, chartStat: "走势数据获取失败" });
+      this.render();
+    }
   },
 
   render() {
@@ -133,6 +143,7 @@ Page({
 
     // 图表：按所选区间裁剪
     const c = this.chart;
+    const R = RANGES[this.data.rangeIdx];
     const series = c[cur];
     const noCur = !series || series.every((v) => v === null);
     let stat = "", sampleNote = "";
@@ -143,12 +154,18 @@ Page({
         if (series[i] !== null) pts.push([c.dates[i], series[i]]);
       }
       if (pts.length > 1) {
-        const r = (pts[pts.length - 1][1] / pts[0][1] - 1) * 100;
-        stat = `${pts[0][0]} → ${pts[pts.length - 1][0]} · ${fmt(r)}`;
-        // 长区间的早段是周采样，如实标注
+        // 数字一律以快照为准，图表只负责画形状，从结构上消除第二个数据源
+        const snapV = ((s.snapshot[this.code] || {})[R.winKey] || {})[cur];
+        if (snapV === null || snapV === undefined) {
+          // 快照说数据不够（起点早于该指数历史），图照画，但标题不能假装是 N 年
+          stat = `数据自 ${c.dates[0]} 起，不足${R.label.replace("近", "")}`;
+          this.draw(pts, pts[pts.length - 1][1] >= pts[0][1]);
+        } else {
+          stat = `${pts[0][0]} → ${pts[pts.length - 1][0]} · ${fmt(snapV)}`;
+          this.draw(pts, snapV >= 0);
+        }
         sampleNote = (c.dailyFrom && pts[0][0] < c.dailyFrom)
           ? `${c.dailyFrom} 之前为每周采样` : "";
-        this.draw(pts, r >= 0);
       } else {
         stat = "该区间数据不足";
         this.clear();
@@ -175,7 +192,14 @@ Page({
       let lo = Math.min(...vals), hi = Math.max(...vals);
       if (hi === lo) { hi += 1; lo -= 1; }
       const pad = (hi - lo) * 0.08; lo -= pad; hi += pad;
-      const x = (i) => padL + (W - padL - padR) * (i / (pts.length - 1));
+      // x 轴必须按日期而非数组下标：近一年是日采样、更早是周采样，
+      // 按下标等距会让近5年图里最近一年占掉 55% 的宽度（实际只占 20% 的时间），
+      // 把「多年横盘、最近拉升」画成「长期陡峭上行」。
+      const t0 = +new Date(pts[0][0] + "T00:00:00Z");
+      const t1 = +new Date(pts[pts.length - 1][0] + "T00:00:00Z");
+      const span = t1 - t0 || 1;
+      const x = (i) => padL + (W - padL - padR)
+        * ((+new Date(pts[i][0] + "T00:00:00Z") - t0) / span);
       const y = (v) => padT + (H - padT - padB) * (1 - (v - lo) / (hi - lo));
 
       const color = isUp ? "#e0403f" : "#1a9c5b";

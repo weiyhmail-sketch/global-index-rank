@@ -1,7 +1,0 @@
-{
-  "name": "probe",
-  "version": "1.0.0",
-  "description": "数据源连通性探测：确认云函数环境能访问哪些行情接口",
-  "main": "index.js",
-  "dependencies": {}
-}
