@@ -51,19 +51,13 @@ function get(url, timeout = 8000) {
  *   jsDelivr 对分支引用缓存很久，Actions 会主动 purge，但仍可能命中边缘旧副本；
  *   raw.githubusercontent 慢一些但总是最新，作为兜底。
  */
-async function fetchWithFallback(file, freshCheck) {
-  let last, staleBody = null, staleUrl = null;
+async function fetchWithFallback(file) {
+  let last;
   for (const mk of SOURCES) {
     const url = mk(file);
-    try {
-      const body = await get(url);
-      if (!freshCheck || freshCheck(body)) return { body, url, stale: false };
-      staleBody = body; staleUrl = url;
-      last = new Error("内容陈旧");
-    } catch (e) { last = e; }
+    try { return { body: await get(url), url }; }
+    catch (e) { last = e; }
   }
-  // 所有源都陈旧时仍返回，总比没有强，但标记出来
-  if (staleBody) return { body: staleBody, url: staleUrl, stale: true };
   throw new Error(`各源均取不到 ${file}：${last && last.message}`);
 }
 
@@ -93,11 +87,14 @@ exports.main = async (event = {}) => {
 
   if (what === "snapshot" || what === "all") {
     try { await db.createCollection("index_snapshot"); } catch (e) { /* 已存在 */ }
-    const { body, url, stale } = await fetchWithFallback("snapshot.json", freshEnough);
+    const { body, url } = await fetchWithFallback("snapshot.json");
     const snap = JSON.parse(body);
     await upsert("index_snapshot", "latest", { ...snap, ingestedAt: new Date(), sourceUrl: url });
     out.did.push("snapshot");
-    if (stale) out.warning = "各源内容均超过 36 小时，可能是每日构建失败";
+    // 只上报不换源：jsDelivr 的 purge 有传播延迟，一旦因陈旧而回退到
+    // raw.githubusercontent 就变成两次取数，必然撞上 3 秒超时。
+    // 06:10 与 06:20 两次触发本身已是重试。
+    if (!freshEnough(body)) out.warning = "内容超过 36 小时，可能是每日构建失败或 CDN 未刷新";
     Object.assign(out, {
       bytes: Buffer.byteLength(body),
       from: url.includes("jsdelivr") ? "jsDelivr" : "raw.githubusercontent",

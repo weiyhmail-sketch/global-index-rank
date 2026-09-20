@@ -73,7 +73,12 @@ async function pool(items, limit, fn) {
     countries: new Set(meta.map((m) => m.country)).size,
     windows, anchors: ANCHORS, groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
     fxMissing: fx.missing, rankDeltaDays: 7,
-    meta, snapshot, rankDelta, monthly,
+    meta, snapshot, rankDelta,
+  }));
+  // monthly 占快照六成体积，而首屏用不到它（只有自定义区间需要），
+  // 单独成文件以保证每日 ingest 轻快。
+  fs.writeFileSync(path.join(OUT, "monthly.json"), JSON.stringify({
+    generated: new Date().toISOString(), dataAsof: asofs[asofs.length - 1] || null, ...monthly,
   }));
   // 整包 series.json 保留（便于本地调试），但云函数不用它：
   // gzip 后仍有 329 KB、实测 2.57 秒，离 3 秒超时太近。
@@ -100,7 +105,7 @@ async function pool(items, limit, fn) {
   const kb = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0);
   console.log(`\n指数 ${meta.length}/${INDICES.length}，国家 ${new Set(meta.map((m) => m.country)).size}，耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   const nSeries = fs.readdirSync(path.join(OUT, "series")).length - 1;
-  console.log(`snapshot.json ${kb("snapshot.json")} KB · series.json ${(kb("series.json") / 1024).toFixed(2)} MB · fx.json ${kb("fx.json")} KB · series/ ${nSeries} 个分片`);
+  console.log(`snapshot.json ${kb("snapshot.json")} KB · monthly.json ${kb("monthly.json")} KB · series.json ${(kb("series.json") / 1024).toFixed(2)} MB · fx.json ${kb("fx.json")} KB · series/ ${nSeries} 个分片`);
   if (failed.length) {
     console.log("\n失败明细：");
     failed.forEach((f) => console.log(`  ${f.code} (${f.src}/${f.sym}): ${f.err}`));
