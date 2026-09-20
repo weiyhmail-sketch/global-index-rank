@@ -73,7 +73,13 @@ Page({
               : `汇率数据自 ${m.fxFrom} 起，此前只有原币口径。`)
           : (m.note || ""),
       });
-      this.chart = await this.loadChart(RANGES[this.data.rangeIdx]);
+      // 初始这次请求同样要拿票：它是冷启动之后最慢的一个请求，
+      // 而「打开详情页、立刻想看更长的区间」是最自然的操作。
+      const token0 = ++this.rangeToken;
+      const R0 = RANGES[this.data.rangeIdx];
+      const c0 = await this.loadChart(R0);
+      if (token0 !== this.rangeToken) return;   // 用户已经切走了，这张票作废
+      this.setChart(c0, R0);
       this.render();
     } catch (e) {
       this.setData({ loading: false, error: e.message || String(e) });
@@ -87,6 +93,9 @@ Page({
    * （实测 SPX 全量 timeout、带 from 的 181 点 2.2 秒通过）。
    * 按区间取既不超时，也不损失任何数据精度。取过的区间缓存起来。
    */
+  /** 写曲线的唯一入口：曲线和它所属的区间必须一起写，永远不分家。 */
+  setChart(c, r) { this.chart = c; this.chartRange = r; },
+
   /**
    * 取某个区间的曲线并返回它——注意是返回，不是直接写 this.chart。
    * 由调用方在确认这次请求没被更晚的切换取代之后再落盘，
@@ -122,14 +131,18 @@ Page({
     const token = ++this.rangeToken;
     this.setData({ rangeIdx: next });
     try {
-      const c = await this.loadChart(RANGES[next]);
+      const R = RANGES[next];
+      const c = await this.loadChart(R);
       if (token !== this.rangeToken) return;
-      this.chart = c;
+      this.setChart(c, R);
       this.render();
     } catch (err) {
       if (token !== this.rangeToken) return;
-      this.setData({ rangeIdx: prev, chartStat: "走势数据获取失败" });
+      // 顺序要紧：render() 末尾会 setData({chartStat}),写在它前面的提示会被吃掉。
+      // 先 render() 把界面恢复成 prev 区间的正确状态，再覆盖标题说明发生了什么。
+      this.setData({ rangeIdx: prev });
       this.render();
+      this.setData({ chartStat: `取数失败，仍显示${RANGES[prev].label}` });
     }
   },
 
@@ -161,9 +174,15 @@ Page({
       barPos: (r[cur] || 0) >= 0,
     }));
 
-    // 图表：按所选区间裁剪
+    // 图表：区间跟着曲线走，不跟着 picker 走。
+    //
+    // 这里绝不能写 RANGES[this.data.rangeIdx]。picker 的值在 await 之前就改了，
+    // 而曲线要等云函数回来；两者之间那 1-3 秒里，任何一次 render()（切口径是同步的，
+    // 随时可能发生）都会把新区间的快照数值配到旧区间的曲线上——
+    // 实测出现过「近3年」标签配 365 天日期配 +134.74%，而且 load() 那条路不会自愈。
+    // 把曲线和它所属的区间绑成一对，这一类错配就不可能构造出来。
     const c = this.chart;
-    const R = RANGES[this.data.rangeIdx];
+    const R = this.chartRange || RANGES[this.data.rangeIdx];
     const series = c[cur];
     const noCur = !series || series.every((v) => v === null);
     let stat = "", sampleNote = "";

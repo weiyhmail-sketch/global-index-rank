@@ -163,8 +163,15 @@ async function pool(items, limit, fn) {
   //
   // 「全挂才失败」太宽松：单个指数抓取失败会被静默过滤掉，快照里直接少一行，
   // 副标题的国家数跟着变，没有任何人会注意到。拿上一轮的产物比一下最便宜。
+  //
+  // 这道守卫上一轮写完就没运行过：prev-snapshot.json 没人写、workflow 也不下载，
+  // existsSync 恒为 false。第二轮审查逐条查出来的第三个「写了防护但防护够不着」。
+  // 现在 daily.yml 会把上一轮的 snapshot.json 下载成 prev-snapshot.json，
+  // 本地跑则用上一次构建自己留下的副本；两边都取不到才跳过。
   const prevSnapPath = path.join(OUT, "prev-snapshot.json");
-  if (fs.existsSync(prevSnapPath)) {
+  if (!fs.existsSync(prevSnapPath)) {
+    console.log("\n⚠️  没有上一轮产物可比对（prev-snapshot.json 不存在），本次跳过数量守卫");
+  } else {
     try {
       const prev = JSON.parse(fs.readFileSync(prevSnapPath, "utf8"));
       if (prev.meta && prev.meta.length > meta.length) {
@@ -173,8 +180,14 @@ async function pool(items, limit, fn) {
         lost.forEach((m) => console.error(`   丢失 ${m.flag} ${m.country} ${m.name} (${m.code})`));
         process.exit(1);
       }
-    } catch (e) { /* 上一轮产物损坏则跳过比对 */ }
+      console.log(`\n数量守卫：上一轮 ${prev.meta.length} 个指数，本轮 ${meta.length} 个 ✓`);
+    } catch (e) {
+      console.log(`\n⚠️  上一轮产物无法解析（${e.message}），本次跳过数量守卫`);
+    }
   }
+
+  // 留给下一轮比对用。本地连跑两次就能形成闭环，不依赖 workflow。
+  fs.copyFileSync(path.join(OUT, "snapshot.json"), prevSnapPath);
 
   if (meta.length === 0) process.exit(1);
 })();

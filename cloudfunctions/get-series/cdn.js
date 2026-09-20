@@ -10,10 +10,23 @@ const zlib = require("zlib");
 
 const REPO = "weiyhmail-sketch/global-index-rank";
 
-// 函数总超时 3 秒且不可调，留 300ms 给冷启动与 JSON.parse。
-const BUDGET = 2500;
-// 主源超过这个时间还没回来就并发点燃备源。
-const HEDGE_AT = 900;
+/**
+ * 预算分冷热两档。
+ *
+ * 函数总超时 3 秒，不可调。原先写死 2500，注释说「留 300ms 给冷启动与
+ * JSON.parse」——但这算错了：BUDGET 是从 fetchJSON **开始**计时的，
+ * 冷启动发生在它之前，根本不在这 2500ms 里面。于是冷启动那次
+ * 2500 + 冷启动 + parse 会摸到甚至越过 3000，函数被杀。
+ * （自测也印证了：「两源皆挂起」实测 2501ms，热调用还行，冷调用必死。）
+ *
+ * 热调用：3000 − 2500 = 500ms 留给 parse 与回包，够。
+ * 冷调用：零依赖函数首次调用实测 1.0–1.8 秒返回，其中取数本身约 0.5 秒，
+ *         所以冷启动开销大致 0.5–1.3 秒。按上界留位置 → 1400ms。
+ * HEDGE_AT 同比例收紧，否则冷调用时备源刚点火函数就被杀了。
+ */
+const HARD_LIMIT = 3000;
+let warm = false;
+const budgets = () => (warm ? { BUDGET: 2500, HEDGE_AT: 900 } : { BUDGET: 1400, HEDGE_AT: 500 });
 
 /**
  * 源顺序：raw.githubusercontent 优先，jsDelivr 兜底。
@@ -28,11 +41,17 @@ const sources = (f) => [
   `https://cdn.jsdelivr.net/gh/${REPO}@data/${f}`,
 ];
 
-function get(url, timeout = BUDGET, depth = 0) {
+function get(url, timeout, depth = 0) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, {
       headers: { "User-Agent": "index-rank", "Accept-Encoding": "gzip" }, timeout,
     }, (res) => {
+      // 必须挂在 res 上，不能只挂在下面的 st 上。gzip 时 st 是 gunzip 流，
+      // 而 pipe() 不转发源流的错误——res 上一个监听器都没有的话，
+      // 响应中途断流(socket hang up / ECONNRESET)会抛未捕获异常，整个云函数挂掉。
+      // 而实测两个源都返回 content-encoding: gzip，也就是说生产 100% 走那条分支。
+      // 函数挂掉返回的错误不匹配 isTimeout()，utils/cloud.js 连重试都不会做。
+      res.on("error", reject);
       if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (depth >= 3) return reject(new Error("重定向过多"));
@@ -78,12 +97,21 @@ function firstSuccess(ps) {
 
 async function fetchJSON(file) {
   const t0 = Date.now();
+  const { BUDGET, HEDGE_AT } = budgets();
+  warm = true; // 下一次调用起用宽预算
   const [primary, backup] = sources(file);
   const errs = [];
-  const left = () => BUDGET - (Date.now() - t0);
+  // 减 SETTLE 是为了让 BUDGET 真的成为上限。不减的话，最后一次尝试的超时
+  // 恰好落在 BUDGET 那一刻，fetchJSON 会在 BUDGET+ε 才返回——预算线形同虚设
+  // （自测「两源皆挂起」实测 2501ms > 2500 就是这么来的）。
+  const SETTLE = 60;
+  const left = () => BUDGET - SETTLE - (Date.now() - t0);
 
   const attempt = (url) =>
-    get(url, left()).then(
+    // 下限 200：当前调用路径下 left() 恒 ≥1600，但只要有人调大 HEDGE_AT、
+    // 加第三条腿，或者事件循环被阻塞过 BUDGET，它就会变成负数
+    // （实测拆掉对冲定时器时 Node 打过 TimeoutNegativeWarning: -3）。
+    get(url, Math.max(200, left())).then(
       (body) => ({ url, body }),
       (e) => {
         errs.push(`${url.split("/")[2]} ${e.message}`);
@@ -129,4 +157,6 @@ async function fetchJSON(file) {
 const freshEnough = (generated) =>
   !!generated && Date.now() - new Date(generated).getTime() < 36 * 3600 * 1000;
 
-module.exports = { fetchJSON, freshEnough };
+// budgets 导出给 scripts/check-cdn-hedge.js：测试必须和被测代码用同一个数，
+// 各写各的会让断言画在死亡线(3000)而不是设计线上。
+module.exports = { fetchJSON, freshEnough, budgets, HARD_LIMIT };

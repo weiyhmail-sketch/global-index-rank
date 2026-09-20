@@ -17,6 +17,9 @@ page { background: #f6f7f9; }
 .sel { padding:8rpx 18rpx; border-radius:14rpx; background:#eef0f3; border:1rpx solid #e6e8ec; font-size:23rpx; }
 .caret { color:#9aa0a8; font-size:18rpx; margin-left:4rpx; }
 .cstat { font-size:21rpx; color:#6b7280; margin-left:auto; }
+/* 取数在途时 picker 已经跳到新区间，而标题还是旧区间的（标题跟着曲线走，
+   不跟着 picker 走）。置灰是在说「这还不是你刚选的那个」，而不是让它假装是。 */
+.cstat-dim { opacity:.4; }
 
 .chart { width:100%; height:360rpx; }
 .nocur { height:360rpx; display:flex; align-items:center; justify-content:center; color:#9aa0a8; font-size:24rpx; }

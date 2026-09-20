@@ -77,7 +77,8 @@ require("../miniprogram/pages/detail/detail.js");
 
   // 遍历全部 5 个区间 × 3 口径，逐项比对图表标题与格子
   console.log("\n图表标题 vs 各区间涨幅格子（全部区间 × 全部口径）:");
-  let mismatch = 0;
+  let mismatch = 0, compared = 0;   // 必须数「比过几次」：只断言 mismatch===0，
+                                    // 标题全空时零次比较也是零个不一致，测试照样绿
   for (let ci = 0; ci < 3; ci++) {
     inst.setData({ curIdx: ci });
     for (let ri = 0; ri < 5; ri++) {
@@ -91,13 +92,19 @@ require("../miniprogram/pages/detail/detail.js");
       if (grid === "—") {
         const okTrunc = /不足/.test(d2.chartStat) || /数据不足/.test(d2.chartStat);
         if (!okTrunc && chartPct) { mismatch++; console.log(`  ✗ ${cur} ${label}: 格子「—」但图表给了 ${chartPct}`); }
-      } else if (chartPct && chartPct !== grid) {
-        mismatch++; console.log(`  ✗ ${cur} ${label}: 图表 ${chartPct} vs 格子 ${grid}`);
+      } else if (!chartPct) {
+        mismatch++; console.log(`  ✗ ${cur} ${label}: 格子 ${grid}，图表标题却取不出数字「${d2.chartStat}」`);
+      } else {
+        compared++;
+        if (chartPct !== grid) { mismatch++; console.log(`  ✗ ${cur} ${label}: 图表 ${chartPct} vs 格子 ${grid}`); }
       }
     }
   }
   check(mismatch === 0, `图表与格子有 ${mismatch} 处不一致`);
-  console.log(mismatch === 0 ? "  15 个组合全部一致 ✅" : "");
+  // 格子为「—」的组合不参与比对，所以下限不是 15；但必须真的比过，否则
+  // 「标题永远为空」这种改坏方式会零比较、零不一致地混过去。
+  check(compared >= 12, `只真正比对了 ${compared} 个组合（应 ≥12）——标题没取出数字`);
+  console.log(`  ${compared} 个组合逐项比对，${mismatch} 处不一致 ${mismatch === 0 && compared >= 12 ? "✅" : "❌"}`);
 
 
   // 快速连点区间：先发的请求后返回时，不能把旧曲线配上新窗口的数值

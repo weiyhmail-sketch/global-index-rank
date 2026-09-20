@@ -1,0 +1,20 @@
+const fs=require("fs"),path=require("path");
+const R=(f)=>JSON.parse(fs.readFileSync(path.join("dist",f),"utf8"));
+const snapshot=R("snapshot.json"), monthly=R("monthly.json");
+let inst=null;
+global.Page=(o)=>{inst=Object.assign({},o);inst.data=Object.assign({},o.data);inst.setData=function(x){Object.assign(this.data,x)}};
+global.wx={cloud:{callFunction:async({name})=>name==="get-monthly"?{result:{ok:true,...monthly}}:{result:{ok:true,...snapshot}}},stopPullDownRefresh(){},navigateTo(){}};
+require(path.resolve("miniprogram/pages/index/index.js"));
+(async()=>{
+  await inst.load();
+  inst.setData({winIdx:inst.wins.length,isCustom:true}); await inst.ensureMonthly();
+  const n=inst.data.monthOptions.length;
+  const show=(t)=>console.log(`  ${t}\n    m0Idx=${inst.data.m0Idx} m1Idx=${inst.data.m1Idx}  标题「${inst.data.ledeHead}」\n    前3: ${inst.data.rows.slice(0,3).map(r=>r.country+" "+r.pct).join("  ")||"(空)"}  | ${inst.data.stats}`);
+  console.log("月份表:",inst.data.monthOptions[0],"…",inst.data.monthOptions[n-1],`(共 ${n})`);
+  console.log("\n用例 1：终点 picker 选第一项（index 0）");
+  inst.onM1({detail:{value:0}}); show("→");
+  console.log("\n用例 2：起点 picker 选最后一项（index n-1）");
+  inst.onM0({detail:{value:n-1}}); show("→");
+  console.log("\n用例 3：正常区间（对照）");
+  inst.onM0({detail:{value:inst.data.monthOptions.indexOf("2025-12")}}); inst.onM1({detail:{value:n-1}}); show("→");
+})();

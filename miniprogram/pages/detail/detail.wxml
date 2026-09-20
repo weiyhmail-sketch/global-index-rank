@@ -23,7 +23,7 @@
         <picker mode="selector" range="{{rangeOptions}}" value="{{rangeIdx}}" bindchange="onRange">
           <view class="sel">{{rangeOptions[rangeIdx]}}<text class="caret">▾</text></view>
         </picker>
-        <text class="cstat">{{chartStat}}</text>
+        <text class="cstat {{chartLoading ? 'cstat-dim' : ''}}">{{chartStat}}</text>
       </view>
 
       <view wx:if="{{chartLoading}}" class="nocur">加载走势…</view>

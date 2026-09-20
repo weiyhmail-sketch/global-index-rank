@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: "20"
 
-      - name: 取回上一轮汇率（增量用）
+      - name: 取回上一轮产物（增量与数量守卫用）
         run: |
           mkdir -p dist
           # 全量回补汇率要 ~30 秒、900 次 CDN 请求；有上一轮就只补增量。
@@ -32,6 +32,12 @@ jobs:
             "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/fx.json" \
             && echo "已取回上一轮汇率 ($(wc -c < dist/fx.json) 字节)" \
             || echo "未取到上一轮汇率，本次将全量回补"
+          # 上一轮的快照用来比对指数数量。缺了这一步，build-data.js 里那道
+          # 「数量下降即 exit 1」的守卫就是死代码——它上一轮就是这么白写的。
+          curl -sf -m 30 -o dist/prev-snapshot.json \
+            "https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/data/snapshot.json" \
+            && echo "已取回上一轮快照，数量守卫生效" \
+            || echo "未取到上一轮快照，本次跳过数量守卫"
 
       - name: 构建数据
         run: node scripts/build-data.js
@@ -39,6 +45,8 @@ jobs:
       - name: 发布到 data 分支
         run: |
           cd dist
+          # 比对用的副本不发布，否则 data 分支每天多背 52 KB
+          rm -f prev-snapshot.json
           # 孤儿分支 + 强推：只保留一个提交，避免每天 1MB 撑爆仓库历史
           git init -q
           git config user.name "github-actions[bot]"
@@ -53,11 +61,27 @@ jobs:
         run: |
           # jsDelivr 对分支引用缓存很久，不主动 purge 的话云函数会一直吃到旧数据
           # （实测推送新版后 ingest 仍取到上一版）。
-          for f in snapshot.json fx.json series.json; do
+          # chart/ 与 monthly.json 原先不在列表里。对冲之后 jsDelivr 从
+          # 「几乎轮不到的串行兜底」变成「900ms 就点火的第二条腿」，
+          # 它上面一份从没 purge 过的 chart 可能落后不止一版——于是详情页的
+          # 标题(快照,今天)和曲线(chart,旧版)又会对不上，正是上一轮 A3 那对冤家。
+          for f in snapshot.json monthly.json fx.json series.json \
+                   $(ls dist/chart 2>/dev/null | sed 's|^|chart/|'); do
             code=$(curl -s -o /dev/null -w "%{http_code}" \
               "https://purge.jsdelivr.net/gh/${GITHUB_REPOSITORY}@data/${f}")
             echo "  purge ${f} -> HTTP ${code}"
           done
+
+      - name: 构建失败时留下明显痕迹
+        if: failure()
+        run: |
+          # 数量守卫会让构建 exit 1，用户那边则表现为数据停更。
+          # 没有这一步的话，守卫只是红在没人看的地方。
+          echo "## ❌ 每日构建失败" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "data 分支未更新，小程序会继续显示上一轮数据；" >> $GITHUB_STEP_SUMMARY
+          echo "超过 36 小时后客户端会显示数据陈旧提示。" >> $GITHUB_STEP_SUMMARY
+          echo "常见原因：某个指数抓取失败触发了数量守卫（见上方日志）。" >> $GITHUB_STEP_SUMMARY
 
       - name: 摘要
         run: |
