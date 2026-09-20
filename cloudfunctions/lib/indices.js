@@ -40,8 +40,7 @@ const INDICES = [
   { code: "IBEX",   name: "西班牙IBEX35",  country: "西班牙",   flag: "🇪🇸", group: "europe", tier: "ext",  ccy: "EUR", src: "global", sym: "IBEX" },
   { code: "AEX",    name: "荷兰AEX",       country: "荷兰",     flag: "🇳🇱", group: "europe", tier: "ext",  ccy: "EUR", src: "global", sym: "AEX" },
   { code: "BFX",    name: "比利时BEL20",   country: "比利时",   flag: "🇧🇪", group: "europe", tier: "ext",  ccy: "EUR", src: "global", sym: "BEL20" },
-  { code: "MOEX",   name: "莫斯科MICEX",   country: "俄罗斯",   flag: "🇷🇺", group: "europe", tier: "ext",  ccy: "RUB", src: "global", sym: "INDEXCF",
-    note: "欧洲央行自 2022 年起停止发布卢布汇率，故本指数仅提供原币口径。" },
+  { code: "MOEX",   name: "莫斯科MICEX",   country: "俄罗斯",   flag: "🇷🇺", group: "europe", tier: "ext",  ccy: "RUB", src: "global", sym: "INDEXCF" },
   { code: "CASE30", name: "埃及CASE30",    country: "埃及",     flag: "🇪🇬", group: "europe", tier: "tail", ccy: "EGP", src: "global", sym: "CASE" },
 
   // ---- 美洲 ----

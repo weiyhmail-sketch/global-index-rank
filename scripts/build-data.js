@@ -18,7 +18,7 @@ const path = require("path");
 const { INDICES, GROUP_NAMES, TIER_NAMES, CURRENCIES } = require("../cloudfunctions/lib/indices.js");
 const { fetchIndex } = require("../cloudfunctions/lib/sources.js");
 const { fetchFX } = require("../cloudfunctions/lib/fx.js");
-const { buildSnapshot, buildRankDelta, buildMonthly } = require("../cloudfunctions/lib/snapshot.js");
+const { buildSnapshot, buildRankDelta, buildMonthly, buildChart, toPairs } = require("../cloudfunctions/lib/snapshot.js");
 
 const OUT = path.join(__dirname, "..", "dist");
 const ANCHORS = [
@@ -96,6 +96,16 @@ async function pool(items, limit, fn) {
     const pairs = Object.entries(d).sort((a, b) => (a[0] < b[0] ? -1 : 1));
     fs.writeFileSync(path.join(seriesDir, code + ".json"), JSON.stringify({ code, n: pairs.length, data: pairs }));
   }
+  // 走势图分片：近 5 年 × 三种口径，供详情页使用
+  const chartDir = path.join(OUT, "chart");
+  fs.mkdirSync(chartDir, { recursive: true });
+  const fxPairs = Object.fromEntries(Object.entries(fx.rates).map(([c, s]) => [c, toPairs(s)]));
+  for (const m of got) {
+    const c = buildChart(m, series[m.code], fxPairs, { years: 5 });
+    fs.writeFileSync(path.join(chartDir, m.code + ".json"),
+      JSON.stringify({ code: m.code, ccy: m.ccy, n: c.dates.length, ...c }));
+  }
+
   // 索引文件，供客户端/云函数知道有哪些可取
   fs.writeFileSync(path.join(seriesDir, "_index.json"), JSON.stringify({
     generated: new Date().toISOString(),
@@ -105,7 +115,8 @@ async function pool(items, limit, fn) {
   const kb = (f) => (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0);
   console.log(`\n指数 ${meta.length}/${INDICES.length}，国家 ${new Set(meta.map((m) => m.country)).size}，耗时 ${((Date.now() - t0) / 1000).toFixed(1)}s`);
   const nSeries = fs.readdirSync(path.join(OUT, "series")).length - 1;
-  console.log(`snapshot.json ${kb("snapshot.json")} KB · monthly.json ${kb("monthly.json")} KB · series.json ${(kb("series.json") / 1024).toFixed(2)} MB · fx.json ${kb("fx.json")} KB · series/ ${nSeries} 个分片`);
+  const chartSizes = fs.readdirSync(path.join(OUT, "chart")).map((f) => fs.statSync(path.join(OUT, "chart", f)).size);
+  console.log(`snapshot.json ${kb("snapshot.json")} KB · monthly.json ${kb("monthly.json")} KB · series.json ${(kb("series.json") / 1024).toFixed(2)} MB · fx.json ${kb("fx.json")} KB · series/ ${nSeries} 个分片 · chart/ ${chartSizes.length} 个（${(Math.max(...chartSizes) / 1024).toFixed(0)} KB 最大）`);
   if (failed.length) {
     console.log("\n失败明细：");
     failed.forEach((f) => console.log(`  ${f.code} (${f.src}/${f.sym}): ${f.err}`));

@@ -75,6 +75,8 @@ function makeLevelFn(series, ccy, fxPairs) {
 function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
   const { endShiftDays = 0, anchors = [] } = opts;
   const fxPairs = Object.fromEntries(Object.entries(fxRates).map(([c, s]) => [c, toPairs(s)]));
+  // 汇率表整体起点：多数货币共同的最早日期
+  const fxBaseline = Object.values(fxPairs).map((a) => a[0][0]).sort()[0] || "";
   const meta = [], snapshot = {};
 
   for (const m of indices) {
@@ -120,11 +122,29 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
     }
 
     snapshot[m.code] = row;
+
+    // 外币口径最早可得日，从数据推导而非手写 —— 手写说明会随源的变化而过期
+    // （卢布/新台币曾被注为"仅原币口径"，加了兜底源后就不准了）。
+    //
+    // 两种成因要分开，否则会把"汇率表整体起点"和"该货币特有缺口"混为一谈：
+    //   baseline —— 汇率表本身的起点，影响所有历史更长的指数（美股、港股）
+    //   gap      —— 这个货币自己缺早期数据（欧洲央行停发，只能靠兜底源）
+    let fxFrom = null, fxReason = null;
+    if (canFx) {
+      const starts = [fxPairs.CNY[0][0]];
+      if (m.ccy !== "USD") starts.push(fxPairs[m.ccy][0][0]);
+      const s0 = starts.sort().pop();
+      if (s0 > first) {
+        fxFrom = s0;
+        fxReason = s0 > fxBaseline ? "gap" : "baseline";
+      }
+    }
+
     meta.push({
       code: m.code, name: m.name, country: m.country, flag: m.flag,
       group: m.group, tier: m.tier, ccy: m.ccy, source: `sina-${m.src}`,
       asof, start: first, level: Math.round(series[series.length - 1][1] * 100) / 100,
-      canFx, note: m.note || null,
+      canFx, fxFrom, fxReason, note: m.note || null,
     });
   }
   return { meta, snapshot, windows: WINDOWS.map(([key, label]) => ({ key, label })) };
@@ -240,4 +260,38 @@ function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
   return { months, levels };
 }
 
-module.exports = { buildSnapshot, buildRankDelta, buildMonthly, WINDOWS, at, toPairs, minusMonths, shiftDays };
+/**
+ * 单指数的走势图数据：近 N 年日线，三种计价口径。
+ *
+ * 为什么不直接用 series/{code}.json：那份只有原币收盘价，
+ * 而榜单可切到美元/人民币口径，图和榜单口径不一致说不通。
+ * 客户端又拿不到汇率表（gzip 254 KB，云函数取它必超时），
+ * 所以换算只能在构建侧做完。
+ *
+ * 体积控制：日期只存一份，三个口径各一个数值数组；近 5 年约 50 KB/指数。
+ *
+ * @returns { dates: [...], local: [...], usd: [...], cny: [...] }
+ */
+function buildChart(meta, series, fxPairs, opts = {}) {
+  const { years = 5 } = opts;
+  const pairs = toPairs(series);
+  const cutoff = minusMonths(pairs[pairs.length - 1][0], years * 12);
+  const rows = pairs.filter((p) => p[0] >= cutoff);
+  const level = makeLevelFn(pairs, meta.ccy, fxPairs);
+
+  const out = { dates: [], local: [], usd: [], cny: [] };
+  for (const [d] of rows) {
+    out.dates.push(d);
+    for (const cur of ["local", "usd", "cny"]) {
+      const v = level(d, cur);
+      out[cur].push(v === null || v === undefined ? null : sig(v, 8));
+    }
+  }
+  // 整列为空的口径直接丢掉，省体积也让客户端好判断
+  for (const cur of ["usd", "cny"]) {
+    if (out[cur].every((v) => v === null)) delete out[cur];
+  }
+  return out;
+}
+
+module.exports = { buildSnapshot, buildRankDelta, buildMonthly, buildChart, WINDOWS, at, toPairs, minusMonths, shiftDays };

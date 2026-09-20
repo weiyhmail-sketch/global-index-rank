@@ -254,7 +254,12 @@ Page({
       detail: {
         calc,
         meta: `${m.name} · 本币 ${m.ccy} · 点位 ${m.level.toLocaleString()} · 数据 ${m.start} 起 · 源 ${m.source} · 截至 ${m.asof}`,
-        note: m.note || "",
+        // fxFrom / fxReason 由构建侧从汇率数据推导，不是手写说明，不会过期
+        note: m.fxFrom
+          ? (m.fxReason === "gap"
+              ? `${m.ccy} 自 ${m.fxFrom} 起才有公开汇率，更早区间只有原币口径。`
+              : `汇率数据自 ${m.fxFrom} 起，此前该指数只有原币口径。`)
+          : (m.note || ""),
       },
     });
   },

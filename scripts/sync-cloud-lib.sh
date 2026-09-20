@@ -8,7 +8,7 @@
 # 主副本在 cloudfunctions/lib/，改那里，然后跑本脚本同步。
 set -e
 cd "$(dirname "$0")/.."
-for fn in get-snapshot get-series get-monthly; do
+for fn in get-snapshot get-series get-monthly get-chart; do
   [ -d "cloudfunctions/$fn" ] || continue
   rm -rf "cloudfunctions/$fn/lib"
   cp cloudfunctions/lib/cdn.js "cloudfunctions/$fn/"
