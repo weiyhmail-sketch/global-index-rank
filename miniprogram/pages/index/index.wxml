@@ -1,1 +1,94 @@
-<view class="p">指数涨跌总览</view>
+<view class="wrap">
+
+  <view class="hd">
+    <view class="title">全球股市涨幅排行</view>
+    <view class="sub">{{sub}}</view>
+  </view>
+
+  <!-- 吸顶筛选：原型上四行 chip 占首屏 37%，压成单行后降到 6% -->
+  <view class="bar">
+    <picker mode="selector" range="{{winOptions}}" value="{{winIdx}}" bindchange="onWin">
+      <view class="sel">{{winOptions[winIdx]}}<text class="caret">▾</text></view>
+    </picker>
+    <picker mode="selector" range="{{curOptions}}" value="{{curIdx}}" bindchange="onCur">
+      <view class="sel">{{curOptions[curIdx]}}<text class="caret">▾</text></view>
+    </picker>
+    <picker mode="selector" range="{{tierOptions}}" value="{{tierIdx}}" bindchange="onTier">
+      <view class="sel">{{tierOptions[tierIdx]}}<text class="caret">▾</text></view>
+    </picker>
+    <picker mode="selector" range="{{grpOptions}}" value="{{grpIdx}}" bindchange="onGrp">
+      <view class="sel">{{grpOptions[grpIdx]}}<text class="caret">▾</text></view>
+    </picker>
+  </view>
+
+  <view wx:if="{{loading}}" class="card hint">加载中…</view>
+  <view wx:elif="{{error}}" class="card hint err">{{error}}</view>
+
+  <block wx:else>
+    <!-- 结论条：3 秒内让用户拿到一句能复述的话 -->
+    <view class="card lede">
+      <view class="lede-hd">{{ledeHead}}</view>
+      <view wx:if="{{top}}" class="lede-row">
+        <text class="flag">{{top.flag}}</text>
+        <text class="lede-name">{{top.country}}</text>
+        <text class="lede-pct {{top.cls}}">{{top.pct}}</text>
+        <text class="lede-tag">领涨</text>
+      </view>
+      <view wx:if="{{bottom}}" class="lede-row">
+        <text class="flag">{{bottom.flag}}</text>
+        <text class="lede-name">{{bottom.country}}</text>
+        <text class="lede-pct {{bottom.cls}}">{{bottom.pct}}</text>
+        <text class="lede-tag">垫底</text>
+      </view>
+      <view wx:if="{{!top}}" class="hint">该区间无可比数据</view>
+      <view wx:if="{{stats}}" class="stats">{{stats}}</view>
+      <view wx:if="{{moves.length}}" class="stats">
+        <text>近7日名次</text>
+        <block wx:for="{{moves}}" wx:key="code">
+          <text class="mv"><text class="flag sm">{{item.flag}}</text>{{item.country}}<text class="{{item.deltaCls}}"> {{item.delta}}</text></text>
+        </block>
+      </view>
+    </view>
+
+    <!-- 榜单：国名主导，指数名降为副标题 -->
+    <view class="card">
+      <view class="th">
+        <text class="th-rk">#</text>
+        <text class="th-nm">国家 / 指数</text>
+        <text class="th-pc">涨幅</text>
+      </view>
+      <block wx:for="{{rows}}" wx:key="code">
+        <view class="row" bindtap="onTapRow" data-code="{{item.code}}">
+          <view class="rk">{{item.rank}}<text wx:if="{{item.delta}}" class="delta {{item.deltaCls}}">{{item.delta}}</text></view>
+          <view class="nm">
+            <text class="flag">{{item.flag}}</text>
+            <text class="country">{{item.country}}</text>
+            <text class="idx">{{item.name}}{{item.asofTag}}</text>
+          </view>
+          <view class="pc {{item.cls}}">{{item.pct}}</view>
+          <view class="bar-cell">
+            <view class="bar-zero"></view>
+            <view wx:if="{{item.barW}}" class="bar-fill {{item.barPos ? 'up-bg' : 'down-bg'}}"
+                  style="{{item.barPos ? 'left:50%;width:' : 'right:50%;width:'}}{{item.barW}}%"></view>
+          </view>
+        </view>
+        <view wx:if="{{expanded === item.code}}" class="detail">
+          <view wx:if="{{detail.calc}}" class="calc">
+            <text class="{{detail.calc.totalCls}}">{{detail.calc.total}}</text>
+            <text class="calc-eq"> = 原币 </text>
+            <text class="{{detail.calc.localCls}}">{{detail.calc.local}}</text>
+            <text class="calc-eq"> × 汇率 </text>
+            <text class="{{detail.calc.fxCls}}">{{detail.calc.fx}}</text>
+          </view>
+          <view class="dmeta">{{detail.meta}}</view>
+          <view wx:if="{{detail.note}}" class="dmeta">{{detail.note}}</view>
+        </view>
+      </block>
+      <view wx:if="{{fxNote}}" class="note">{{fxNote}}</view>
+      <view wx:if="{{divNote}}" class="note">{{divNote}}</view>
+    </view>
+
+    <view class="card about" bindtap="goAbout">数据口径说明与免责声明 ›</view>
+  </block>
+
+</view>

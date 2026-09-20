@@ -1,5 +1,8 @@
 {
-  "pages": ["pages/index/index"],
+  "pages": [
+    "pages/index/index",
+    "pages/about/about"
+  ],
   "window": {
     "navigationBarTitleText": "全球股市涨幅排行",
     "navigationBarBackgroundColor": "#ffffff",

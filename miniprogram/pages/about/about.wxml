@@ -1,0 +1,36 @@
+<view class="wrap">
+  <view class="sec">
+    <view class="h">价格指数，不含股息</view>
+    <view class="p">各国公开指数几乎都是不含分红的价格指数。各国股息率差异显著（英国约 4%、日本约 2%、美国约 1.3%），因此长周期比较会系统性低估高股息市场。本表不做股息回补，仅在长周期窗口提示。</view>
+  </view>
+  <view class="sec">
+    <view class="h">计价货币</view>
+    <view class="p">「原币种」为指数原始计价货币；「人民币」「美元」口径按区间两端各自对应日期的汇率换算。默认人民币——对中文用户这是实际拿到的收益；跨国可比性则看美元口径。</view>
+    <view class="p">实测中三种口径差异不小：17 个可比市场里，美元与人民币口径平均差 4.63 个百分点，有 3 个市场涨跌符号相反。点开榜单任一行可看到「原币涨幅 × 汇率变动」的拆解。</view>
+  </view>
+  <view class="sec">
+    <view class="h">交易日对齐</view>
+    <view class="p">各国收盘时点不同，不存在统一的「今日」。每个指数取其最近一个已收盘交易日；数据日期与全局最新不一致时会在行内标注。区间起点取「该日或之前最近一个交易日」的收盘价，不做插值。</view>
+    <view class="p">数据起点晚于所选区间的显示「—」，不用首日数据充数。</view>
+  </view>
+  <view class="sec">
+    <view class="h">汇率缺失</view>
+    <view class="p">个别市场在较早区间无可用汇率（欧洲央行已于 2020 年停发新台币汇率，2022 年起停发卢布汇率）。此时表中为原币涨幅并标 <text class="b">*</text>，仍参与排名——不让市场因缺一个口径而凭空消失。</view>
+  </view>
+  <view class="sec">
+    <view class="h">名次变化</view>
+    <view class="p">「↑2」表示该市场在当前口径与区间下，名次较 7 个自然日前上升 2 位。</view>
+  </view>
+  <view class="sec">
+    <view class="h">榜单分层</view>
+    <view class="p">默认只排核心 12 国。长尾市场流动性低、单日跳动大，与核心市场同榜会系统性霸占榜首榜尾，让榜单看起来像噪音而不是信号；需要时可切换到「全部」。</view>
+  </view>
+  <view class="sec">
+    <view class="h">数据来源</view>
+    <view class="p">新浪财经公开行情接口（环球指数、A 股、美股、港股四条线）；汇率来自欧洲央行（Frankfurter）与 currency-api。每日收盘后更新一次。</view>
+  </view>
+  <view class="sec disc">
+    <view class="h">免责声明</view>
+    <view class="p">本页数据来自公开市场行情接口，仅供参考，不构成任何投资建议。数据可能存在延迟或误差，据此操作风险自负。</view>
+  </view>
+</view>

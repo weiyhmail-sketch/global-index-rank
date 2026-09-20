@@ -1,0 +1,8 @@
+page { background: #f6f7f9; }
+.wrap { padding: 24rpx 24rpx 80rpx; }
+.sec { background: #fff; border: 1rpx solid #e6e8ec; border-radius: 24rpx; padding: 28rpx; margin-bottom: 20rpx; }
+.h { font-size: 29rpx; font-weight: 600; margin-bottom: 14rpx; }
+.p { font-size: 25rpx; color: #4b5563; line-height: 1.8; margin-bottom: 10rpx; }
+.p:last-child { margin-bottom: 0; }
+.b { font-weight: 700; color: #14161a; }
+.disc { background: #fdfaf0; }
