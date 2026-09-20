@@ -135,6 +135,29 @@ require("../miniprogram/pages/detail/detail.js");
   }
   global.wx.cloud.callFunction = realCall;
 
+
+  // 加载失败后留在页面上直接切区间：令牌若在 load() 里初始化，
+  // 此时它还是 undefined，++undefined 得到 NaN，而 NaN !== NaN 恒真，
+  // onRange 会把每一次切换都当成过期请求丢掉——选了没反应，也不报错。
+  console.log("\n加载失败后直接切区间:");
+  // 真实场景是一个全新的页面实例，之前那次成功加载留下的 snap/m 不该还在
+  inst.snap = undefined; inst.m = undefined; inst.chart = undefined;
+  inst.rangeToken = undefined; inst.setData({ rangeIdx: 2, chartStat: "" });
+  inst.onLoad({ code: "不存在的指数", cur: "cny" });   // load() 在 meta.find 之后抛出
+  await new Promise((r) => setTimeout(r, 400));
+  check(!!inst.data.error, "未找到指数时应显示错误");
+  const beforeIdx = inst.data.rangeIdx;
+  let threw = "";
+  try { await inst.onRange({ detail: { value: 4 } }); }
+  catch (e) { threw = e.message || String(e); }
+  await new Promise((r) => setTimeout(r, 200));
+  console.log(`  令牌=${inst.rangeToken} 区间 ${beforeIdx}→${inst.data.rangeIdx} 标题「${inst.data.chartStat}」${threw ? " 抛出:" + threw : ""}`);
+  // 令牌必须在 onLoad 里就位。若等到 load() 内部才初始化，加载一抛异常它就是
+  // undefined，之后 ++undefined 得到 NaN，NaN !== NaN 恒真，切区间会静默失效。
+  check(typeof inst.rangeToken === "number" && !Number.isNaN(inst.rangeToken),
+        `令牌是 ${inst.rangeToken} —— 加载失败后每次切区间都会被当成过期请求丢弃`);
+  check(!threw, `onRange 抛出未捕获异常: ${threw}`);
+
   console.log();
   if (fail.length) { console.log("❌ 问题:"); fail.forEach((f) => console.log("  " + f)); process.exit(1); }
   console.log("✅ 详情页逻辑全部通过");

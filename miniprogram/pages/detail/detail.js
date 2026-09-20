@@ -41,6 +41,10 @@ Page({
   },
 
   onLoad(q) {
+    // 令牌要在这里初始化，不能放在 load() 里。load() 第一行就 await 取快照，
+    // 取失败(实测约一成)就抛出，令牌永远是 undefined；此后 ++undefined 得到 NaN，
+    // 而 NaN !== NaN 恒真，onRange 会把每一次切区间都当成过期请求静默丢弃。
+    this.rangeToken = 0;
     this.code = q.code;
     const cur = CURS.findIndex((c) => c.key === q.cur);
     this.setData({ code: q.code, curIdx: cur < 0 ? 0 : cur });
@@ -69,7 +73,6 @@ Page({
               : `汇率数据自 ${m.fxFrom} 起，此前只有原币口径。`)
           : (m.note || ""),
       });
-      this.rangeToken = 0;
       this.chart = await this.loadChart(RANGES[this.data.rangeIdx]);
       this.render();
     } catch (e) {
@@ -108,6 +111,9 @@ Page({
   async onRange(e) {
     // 先取数、成功后再切标签。反过来的话一旦取数失败，
     // 新标签会挂着旧区间的曲线，之后任何一次 onCur 都会把这个错配渲染出来。
+    // 页面压根没加载成功(快照失败/指数不存在)时，this.snap 与 this.m 都不存在，
+    // render() 会对 undefined 解引用。此时页面已经在显示错误，切区间无意义。
+    if (!this.snap || !this.m) return;
     const prev = this.data.rangeIdx;
     const next = +e.detail.value;
     // 令牌：连点几下区间时，先发的请求可能后返回。render() 读的是渲染那一刻的
