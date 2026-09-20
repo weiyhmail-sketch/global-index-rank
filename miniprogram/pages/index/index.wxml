@@ -21,6 +21,21 @@
     </picker>
   </view>
 
+  <!-- 自定义月度区间：两个月份选择器 -->
+  <view wx:if="{{isCustom}}" class="card months">
+    <view wx:if="{{monthlyLoading}}" class="hint">加载月度数据…</view>
+    <block wx:else>
+      <picker mode="selector" range="{{monthOptions}}" value="{{m0Idx}}" bindchange="onM0">
+        <view class="msel">{{monthOptions[m0Idx]}} 月末</view>
+      </picker>
+      <text class="marrow">→</text>
+      <picker mode="selector" range="{{monthOptions}}" value="{{m1Idx}}" bindchange="onM1">
+        <view class="msel">{{monthOptions[m1Idx]}}</view>
+      </picker>
+      <view class="mnote">取该月末或之前最近一个交易日的真实收盘价</view>
+    </block>
+  </view>
+
   <view wx:if="{{loading}}" class="card hint">加载中…</view>
   <view wx:elif="{{error}}" class="card hint err">{{error}}</view>
 

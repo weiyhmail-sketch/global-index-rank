@@ -31,6 +31,8 @@ Page({
     sub: "", ledeHead: "", top: null, bottom: null, stats: "", moves: [],
     rows: [], naCount: 0, expanded: "", detail: null,
     fxNote: "", divNote: "",
+    // 自定义月度区间
+    isCustom: false, monthOptions: [], m0Idx: 0, m1Idx: 0, monthlyLoading: false,
   },
 
   onLoad() { this.load(); },
@@ -54,7 +56,7 @@ Page({
 
       const ytd = this.wins.findIndex((w) => w.key === "ytd");
       this.setData({
-        winOptions: this.wins.map((w) => w.label),
+        winOptions: [...this.wins.map((w) => w.label), "自定义月度区间…"],
         grpOptions: this.grps.map((g) => g.label),
         winIdx: ytd < 0 ? 0 : ytd,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${d.dataAsof}`,
@@ -68,7 +70,43 @@ Page({
     }
   },
 
-  onWin(e) { this.setData({ winIdx: +e.detail.value, expanded: "" }); this.render(); },
+  onWin(e) {
+    const i = +e.detail.value;
+    const isCustom = i === this.wins.length;   // 最后一项是「自定义月度区间…」
+    this.setData({ winIdx: i, isCustom, expanded: "" });
+    if (isCustom) return this.ensureMonthly();
+    this.render();
+  },
+
+  /**
+   * 按需加载各月末点位。
+   *
+   * 不并入首屏数据：它占快照六成体积，而多数用户不会打开自定义区间。
+   */
+  async ensureMonthly() {
+    if (this.monthly) return this.render();
+    this.setData({ monthlyLoading: true });
+    try {
+      const res = await wx.cloud.callFunction({ name: "get-monthly" });
+      const d = res.result;
+      if (!d || !d.ok) throw new Error((d && d.error) || "月度数据为空");
+      this.monthly = d;
+      const n = d.months.length;
+      this.setData({
+        monthOptions: d.months,
+        // 默认起点取去年末，终点取最新
+        m0Idx: Math.max(0, d.months.indexOf(String(+d.dataAsof.slice(0, 4) - 1) + "-12")),
+        m1Idx: n - 1,
+        monthlyLoading: false,
+      });
+      this.render();
+    } catch (e) {
+      this.setData({ monthlyLoading: false, error: e.message || String(e) });
+    }
+  },
+
+  onM0(e) { this.setData({ m0Idx: +e.detail.value, expanded: "" }); this.render(); },
+  onM1(e) { this.setData({ m1Idx: +e.detail.value, expanded: "" }); this.render(); },
   onCur(e) { this.setData({ curIdx: +e.detail.value, expanded: "" }); this.render(); },
   onTier(e) { this.setData({ tierIdx: +e.detail.value, expanded: "" }); this.render(); },
   onGrp(e) { this.setData({ grpIdx: +e.detail.value, expanded: "" }); this.render(); },
@@ -76,7 +114,9 @@ Page({
   render() {
     const d = this.raw;
     if (!d) return;
-    const win = this.wins[this.data.winIdx].key;
+    // 自定义模式下 winIdx 指向选项列表末尾的「自定义…」，wins 里没有对应项
+    const winMeta = this.wins[this.data.winIdx];
+    const win = winMeta ? winMeta.key : "custom";
     const cur = CURS[this.data.curIdx].key;
     const tier = TIERS[this.data.tierIdx].key;
     const grp = this.grps[this.data.grpIdx].key;
@@ -84,7 +124,25 @@ Page({
     const tierOk = (m) => tier === "all" ? true : tier === "ext" ? m.tier !== "tail" : m.tier === "core";
     const pool = d.meta.filter((m) => tierOk(m) && (grp === "all" || m.group === grp));
 
+    // 自定义区间：用两个月末点位现算，涨幅 = 终点/起点 - 1
+    const custom = this.data.isCustom && this.monthly
+      ? { m: this.monthly, i0: this.data.m0Idx, i1: this.data.m1Idx } : null;
+    const customVal = (code, cur2) => {
+      const L = custom.m.levels[code];
+      if (!L || !L[cur2]) return null;
+      const a = L[cur2][custom.i0], b = L[cur2][custom.i1];
+      return (a === null || b === null || a === undefined || b === undefined || !a)
+        ? null : (b / a - 1) * 100;
+    };
+
     const val = (code) => {
+      if (custom) {
+        const v = customVal(code, cur);
+        if (v !== null) return { v, fb: false };
+        if (cur === "local") return { v: null, fb: false };
+        const loc = customVal(code, "local");
+        return loc !== null ? { v: loc, fb: true } : { v: null, fb: false };
+      }
       const r = d.snapshot[code] && d.snapshot[code][win];
       if (!r) return { v: null, fb: false };
       const v = r[cur];
@@ -104,7 +162,8 @@ Page({
     const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
 
     const rows = ok.concat(na).map((r, i) => {
-      const dl = ((d.rankDelta || {})[r.m.code] || {})[win];
+      // 自定义区间没有预计算的名次变化，不显示角标
+      const dl = custom ? null : ((d.rankDelta || {})[r.m.code] || {})[win];
       const delta = dl ? dl[cur] : null;
       return {
         code: r.m.code, flag: r.m.flag, country: r.m.country, name: r.m.name,
@@ -138,10 +197,15 @@ Page({
     }
 
     const fbNames = all.filter((r) => r.fb).map((r) => r.m.name);
-    const isLong = ["y1", "y3", "y5"].includes(win) || win.startsWith("anchor:");
+    const isLong = custom
+      ? (this.monthly.months[this.data.m1Idx].slice(0, 4) !== this.monthly.months[this.data.m0Idx].slice(0, 4))
+      : (["y1", "y3", "y5"].includes(win) || win.startsWith("anchor:"));
+    const winLabel = custom
+      ? `${this.monthly.months[this.data.m0Idx]} 月末 → ${this.monthly.months[this.data.m1Idx]}`
+      : (winMeta ? winMeta.label : "");
 
     this.setData({
-      ledeHead: `${this.wins[this.data.winIdx].label} · ${CURS[this.data.curIdx].label}口径`,
+      ledeHead: `${winLabel} · ${CURS[this.data.curIdx].label}口径`,
       top: ok.length ? line(ok[0]) : null,
       bottom: ok.length > 1 ? line(ok[ok.length - 1]) : null,
       stats, moves, rows, naCount: na.length,
@@ -156,10 +220,21 @@ Page({
     if (this.data.expanded === code) return this.setData({ expanded: "", detail: null });
 
     const d = this.raw;
-    const win = this.wins[this.data.winIdx].key;
+    // 自定义模式下 winIdx 指向选项列表末尾的「自定义…」，wins 里没有对应项
+    const winMeta = this.wins[this.data.winIdx];
+    const win = winMeta ? winMeta.key : "custom";
     const cur = CURS[this.data.curIdx].key;
     const m = d.meta.find((x) => x.code === code);
-    const r = (d.snapshot[code] || {})[win] || {};
+    let r = (d.snapshot[code] || {})[win] || {};
+    if (this.data.isCustom && this.monthly) {
+      const L = this.monthly.levels[code] || {};
+      const i0 = this.data.m0Idx, i1 = this.data.m1Idx;
+      r = {};
+      for (const c of ["local", "usd", "cny"]) {
+        const a = L[c] && L[c][i0], b = L[c] && L[c][i1];
+        r[c] = (a && b) ? (b / a - 1) * 100 : null;
+      }
+    }
     const fmt = (v) => (v > 0 ? "+" : "") + v.toFixed(2) + "%";
     const cls = (v) => (v > 0 ? "up" : v < 0 ? "down" : "flat");
 

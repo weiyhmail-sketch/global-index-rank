@@ -84,3 +84,12 @@ page { background: #f6f7f9; }
   background: #fdecec; font-size: 22rpx; color: #6b7280; line-height: 1.6;
 }
 .about { text-align: center; color: #6b7280; font-size: 25rpx; }
+
+/* 自定义月度区间 */
+.months { display: flex; align-items: center; flex-wrap: wrap; gap: 16rpx; }
+.msel {
+  padding: 12rpx 24rpx; border-radius: 16rpx;
+  background: #eef0f3; border: 1rpx solid #e6e8ec; font-size: 26rpx;
+}
+.marrow { color: #9aa0a8; font-size: 26rpx; }
+.mnote { width: 100%; font-size: 21rpx; color: #9aa0a8; margin-top: 4rpx; }

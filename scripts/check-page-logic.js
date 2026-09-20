@@ -9,6 +9,7 @@ const fs = require("fs");
 const path = require("path");
 
 const snapshot = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "dist", "snapshot.json"), "utf8"));
+const monthly = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "dist", "monthly.json"), "utf8"));
 
 let inst = null;
 global.Page = (opts) => {
@@ -17,7 +18,11 @@ global.Page = (opts) => {
   inst.setData = function (o) { Object.assign(this.data, o); };
 };
 global.wx = {
-  cloud: { callFunction: async () => ({ result: { ok: true, ...snapshot } }) },
+  cloud: {
+    callFunction: async ({ name }) =>
+      name === "get-monthly" ? { result: { ok: true, ...monthly } }
+                             : { result: { ok: true, ...snapshot } },
+  },
   stopPullDownRefresh() {},
   navigateTo() {},
 };
@@ -73,6 +78,36 @@ require("../miniprogram/pages/index/index.js");
   const rhs = (1 + parseFloat(c.local) / 100) * (1 + parseFloat(c.fx) / 100);
   check(Math.abs(lhs - rhs) < 0.0002, `拆解乘法不成立: ${lhs} vs ${rhs}`);
   console.log(`  乘法校验 ${lhs.toFixed(6)} ≈ ${rhs.toFixed(6)}  ${Math.abs(lhs - rhs) < 0.0002 ? "✅" : "❌"}`);
+
+  // 自定义月度区间：选「去年12月末 → 最新」，结果应与预置的今年以来一致
+  inst.setData({ tierIdx: 0, curIdx: 0, expanded: "" });
+  await inst.onWin({ detail: { value: inst.wins.length } });
+  check(inst.data.isCustom, "未进入自定义模式");
+  const prevDec = String(+snapshot.dataAsof.slice(0, 4) - 1) + "-12";
+  inst.setData({ m0Idx: monthly.months.indexOf(prevDec), m1Idx: monthly.months.length - 1 });
+  inst.render();
+  console.log(`\n自定义区间「${prevDec} 月末 → 最新」前3:`);
+  inst.data.rows.slice(0, 3).forEach((r) => console.log(`  ${r.rank} ${r.flag} ${r.country} ${r.pct}`));
+  check(inst.data.ledeHead.includes(prevDec), "自定义标题未反映所选月份");
+  check(!inst.data.rows.some((r) => r.delta), "自定义区间不应显示名次变化角标");
+
+  // 与预置「今年以来」逐项比对
+  const ytdRows = {};
+  inst.setData({ winIdx: inst.wins.findIndex((w) => w.key === "ytd"), isCustom: false });
+  inst.render();
+  inst.data.rows.forEach((r) => (ytdRows[r.code] = r.pct));
+  await inst.onWin({ detail: { value: inst.wins.length } });
+  inst.setData({ m0Idx: monthly.months.indexOf(prevDec), m1Idx: monthly.months.length - 1 });
+  inst.render();
+  let diffN = 0;
+  inst.data.rows.forEach((r) => {
+    const a = parseFloat(r.pct), b = parseFloat(ytdRows[r.code]);
+    if (!isNaN(a) && !isNaN(b) && Math.abs(a - b) > 0.02) {
+      diffN++; if (diffN <= 3) console.log(`  ✗ ${r.country}: 自定义 ${r.pct} vs 今年以来 ${ytdRows[r.code]}`);
+    }
+  });
+  check(diffN === 0, `自定义区间与预置今年以来有 ${diffN} 处不一致`);
+  console.log(diffN === 0 ? "  与预置「今年以来」逐项一致 ✅" : "");
 
   console.log();
   if (fail.length) { console.log("❌ 发现问题:"); fail.forEach((f) => console.log("  " + f)); process.exit(1); }
