@@ -27,6 +27,7 @@ global.wx = {
   navigateTo() {},
 };
 
+// utils/cloud.js 内部用 wx.cloud.callFunction，这里的桩已覆盖
 require("../miniprogram/pages/index/index.js");
 
 (async () => {

@@ -4,6 +4,8 @@
  * 图表数据来自构建侧预计算的 chart/{code}.json（近5年×三种口径）：
  * 客户端拿不到汇率表，换算只能在构建侧做完，否则图与榜单口径对不上。
  */
+const { call } = require("../../utils/cloud.js");
+
 const CURS = [
   { key: "cny", label: "人民币" },
   { key: "usd", label: "美元" },
@@ -44,8 +46,7 @@ Page({
 
   async load() {
     try {
-      const snapRes = await wx.cloud.callFunction({ name: "get-snapshot" });
-      const snap = snapRes.result;
+      const snap = await call("get-snapshot");
       if (!snap || !snap.ok) throw new Error("快照获取失败");
       this.snap = snap;
       this.chartCache = {};
@@ -85,8 +86,7 @@ Page({
     this.setData({ chartLoading: true });
     try {
       const from = minusMonths(this.m.asof, r.months);
-      const res = await wx.cloud.callFunction({ name: "get-chart", data: { code: this.code, from } });
-      const c = res.result;
+      const c = await call("get-chart", { code: this.code, from });
       if (!c || !c.ok) throw new Error((c && c.error) || "走势数据获取失败");
       this.chartCache[r.key] = c;
       this.chart = c;

@@ -8,6 +8,8 @@
  * WXML 不能做运算，所以展示用的字符串（百分比、颜色类名、条宽）
  * 都在这里算好再 setData。
  */
+const { call } = require("../../utils/cloud.js");
+
 const CURS = [
   { key: "cny", label: "人民币" },
   { key: "usd", label: "美元" },
@@ -41,8 +43,7 @@ Page({
   async load(isPull) {
     this.setData({ loading: true, error: "" });
     try {
-      const res = await wx.cloud.callFunction({ name: "get-snapshot" });
-      const d = res.result;
+      const d = await call("get-snapshot");
       if (!d || !d.ok) throw new Error((d && d.error) || "数据为空");
       this.raw = d;
 
@@ -54,12 +55,20 @@ Page({
       this.grps = [{ key: "all", label: "全部地区" },
         ...Object.entries(d.groupNames || {}).map(([key, label]) => ({ key, label }))];
 
+      // 用众数而非最大值作为「数据截至」基准。
+      // dataAsof 取的是全体最大值，而埃及交易所是周日到周四交易，
+      // 它的最新日常常比其余市场晚；若以它为基准，另外 32 行都会被
+      // 标上「截至 09-18」，列表全是噪音。众数才代表大盘的口径日。
+      const counts = {};
+      d.meta.forEach((m) => (counts[m.asof] = (counts[m.asof] || 0) + 1));
+      this.baseAsof = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || (a < b ? 1 : -1))[0];
+
       const ytd = this.wins.findIndex((w) => w.key === "ytd");
       this.setData({
         winOptions: [...this.wins.map((w) => w.label), "自定义月度区间…"],
         grpOptions: this.grps.map((g) => g.label),
         winIdx: ytd < 0 ? 0 : ytd,
-        sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${d.dataAsof}`,
+        sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
         loading: false,
       });
       this.render();
@@ -87,8 +96,7 @@ Page({
     if (this.monthly) return this.render();
     this.setData({ monthlyLoading: true });
     try {
-      const res = await wx.cloud.callFunction({ name: "get-monthly" });
-      const d = res.result;
+      const d = await call("get-monthly");
       if (!d || !d.ok) throw new Error((d && d.error) || "月度数据为空");
       this.monthly = d;
       const n = d.months.length;
@@ -175,7 +183,7 @@ Page({
         delta: (delta === null || delta === undefined || delta === 0) ? ""
           : (delta > 0 ? "↑" : "↓") + Math.abs(delta),
         deltaCls: delta > 0 ? "up" : "down",
-        asofTag: r.m.asof !== d.dataAsof ? " · 截至" + r.m.asof.slice(5) : "",
+        asofTag: r.m.asof !== this.baseAsof ? " · 截至" + r.m.asof.slice(5) : "",
       };
     });
 

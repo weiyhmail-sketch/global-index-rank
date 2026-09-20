@@ -58,9 +58,10 @@ page { background: #f6f7f9; }
 }
 .delta { font-size: 18rpx; font-weight: 600; }
 .nm { flex: 1; display: flex; align-items: baseline; gap: 10rpx; min-width: 0; }
-.country { font-size: 29rpx; font-weight: 600; }
+/* 国名必须整行显示：不加 nowrap 会被 flex 压成「韩/国」「澳大/利亚」 */
+.country { font-size: 29rpx; font-weight: 600; white-space: nowrap; flex: none; }
 .idx {
-  font-size: 21rpx; color: #6b7280;
+  font-size: 21rpx; color: #6b7280; flex: 1; min-width: 0;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .pc { width: 150rpx; text-align: right; font-size: 28rpx; font-weight: 650; }
