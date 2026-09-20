@@ -321,4 +321,46 @@ function buildChart(meta, series, fxPairs, opts = {}) {
   return out;
 }
 
-module.exports = { buildSnapshot, buildRankDelta, buildMonthly, buildChart, WINDOWS, at, toPairs, minusMonths, shiftDays };
+/**
+ * 逐年涨幅（三种计价口径）。
+ *
+ * 产品评审把「分年度矩阵」判为该砍——48 行 × 10 列在手机上只能横向滚动，
+ * 而横滚表格是移动端最差的交互。替代方案是详情页里单个指数的逐年竖排列表：
+ * 成本十分之一，回答的却是同一个问题「这个市场哪年好哪年差」。
+ *
+ * 直接复用各年 12 月末的点位，不另取数据。当年为「年初至今」。
+ *
+ * @returns { code: [{ year, label, local, usd, cny }] }  由近及远
+ */
+function buildYearly(monthly, opts = {}) {
+  const { years = 6 } = opts;
+  const { months, levels } = monthly;
+  if (!months || !months.length) return {};
+
+  const idxOf = (mm) => months.indexOf(mm);
+  const lastYear = +months[months.length - 1].slice(0, 4);
+  const out = {};
+
+  for (const [code, L] of Object.entries(levels)) {
+    const rows = [];
+    for (let y = lastYear; y > lastYear - years; y--) {
+      const i0 = idxOf(`${y - 1}-12`);
+      // 当年用最新一个月；往年用该年 12 月
+      const i1 = y === lastYear ? months.length - 1 : idxOf(`${y}-12`);
+      if (i0 < 0 || i1 < 0) continue;
+      const r = { year: y, label: y === lastYear ? `${y} 年初至今` : `${y} 年` };
+      let any = false;
+      for (const cur of ["local", "usd", "cny"]) {
+        const a = L[cur] && L[cur][i0], b = L[cur] && L[cur][i1];
+        const v = (a && b) ? Math.round((b / a - 1) * 10000) / 100 : null;
+        r[cur] = v;
+        if (v !== null) any = true;
+      }
+      if (any) rows.push(r);
+    }
+    if (rows.length) out[code] = rows;
+  }
+  return out;
+}
+
+module.exports = { buildSnapshot, buildRankDelta, buildMonthly, buildChart, buildYearly, WINDOWS, at, toPairs, minusMonths, shiftDays };

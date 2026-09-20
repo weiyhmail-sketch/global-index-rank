@@ -18,7 +18,7 @@ const path = require("path");
 const { INDICES, GROUP_NAMES, TIER_NAMES, CURRENCIES } = require("../cloudfunctions/lib/indices.js");
 const { fetchIndex } = require("../cloudfunctions/lib/sources.js");
 const { fetchFX } = require("../cloudfunctions/lib/fx.js");
-const { buildSnapshot, buildRankDelta, buildMonthly, buildChart, toPairs } = require("../cloudfunctions/lib/snapshot.js");
+const { buildSnapshot, buildRankDelta, buildMonthly, buildChart, buildYearly, toPairs } = require("../cloudfunctions/lib/snapshot.js");
 
 const OUT = path.join(__dirname, "..", "dist");
 const ANCHORS = [
@@ -64,6 +64,7 @@ async function pool(items, limit, fn) {
   const { meta, snapshot, windows } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
   const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS });
   const monthly = buildMonthly(got, series, fx.rates, { years: 6 });
+  const yearly = buildYearly(monthly, { years: 6 });
   const asofs = meta.map((m) => m.asof).sort();
 
   fs.writeFileSync(fxPath, JSON.stringify(fx));
@@ -73,7 +74,7 @@ async function pool(items, limit, fn) {
     countries: new Set(meta.map((m) => m.country)).size,
     windows, anchors: ANCHORS, groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
     fxMissing: fx.missing, rankDeltaDays: 7,
-    meta, snapshot, rankDelta,
+    meta, snapshot, rankDelta, yearly,
   }));
   // monthly 占快照六成体积，而首屏用不到它（只有自定义区间需要），
   // 单独成文件以保证每日 ingest 轻快。

@@ -21,7 +21,7 @@ exports.main = async (event = {}) => {
       ...base,
       windows: d.windows, anchors: d.anchors, groupNames: d.groupNames,
       tierNames: d.tierNames, fxMissing: d.fxMissing,
-      meta: d.meta, snapshot: d.snapshot, rankDelta: d.rankDelta,
+      meta: d.meta, snapshot: d.snapshot, rankDelta: d.rankDelta, yearly: d.yearly,
     };
   } catch (e) {
     return { ok: false, error: String(e.message || e) };

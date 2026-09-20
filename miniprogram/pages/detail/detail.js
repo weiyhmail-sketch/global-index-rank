@@ -34,7 +34,7 @@ Page({
     code: "", flag: "", country: "", name: "", level: "", asof: "", metaLine: "", note: "",
     curIdx: 0, curOptions: CURS.map((c) => c.label),
     rangeIdx: 2, rangeOptions: RANGES.map((r) => r.label),
-    wins: [], chartStat: "", sampleNote: "", noCur: false,
+    wins: [], chartStat: "", sampleNote: "", noCur: false, years: [],
   },
 
   onLoad(q) {
@@ -119,6 +119,18 @@ Page({
       return { label: w.label, pct: fmt(v), cls: cls(v) };
     });
 
+    // 逐年涨幅：产品评审把「分年度矩阵」判为该砍（手机上只能横滚），
+    // 单个指数的竖排列表回答同一个问题，成本低得多。
+    const yrs = (s.yearly || {})[this.code] || [];
+    const ymax = Math.max(1, ...yrs.map((r) => Math.abs(r[cur] || 0)));
+    const years = yrs.map((r) => ({
+      label: r.label,
+      pct: fmt(r[cur]),
+      cls: cls(r[cur]),
+      barW: r[cur] === null || r[cur] === undefined ? 0 : Math.abs(r[cur]) / ymax * 46,
+      barPos: (r[cur] || 0) >= 0,
+    }));
+
     // 图表：按所选区间裁剪
     const c = this.chart;
     const series = c[cur];
@@ -144,7 +156,7 @@ Page({
     } else {
       this.clear();
     }
-    this.setData({ wins, chartStat: stat, sampleNote, noCur });
+    this.setData({ wins, years, chartStat: stat, sampleNote, noCur });
   },
 
   clear() {

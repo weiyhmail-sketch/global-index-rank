@@ -42,6 +42,19 @@
       </view>
     </view>
 
+    <view wx:if="{{years.length}}" class="card">
+      <view class="h">逐年涨幅 · {{curOptions[curIdx]}}口径</view>
+      <view wx:for="{{years}}" wx:key="label" class="yrow">
+        <text class="ylab">{{item.label}}</text>
+        <view class="ybar">
+          <view class="ybar-zero"></view>
+          <view wx:if="{{item.barW}}" class="ybar-fill {{item.barPos ? 'up-bg' : 'down-bg'}}"
+                style="{{item.barPos ? 'left:50%;width:' : 'right:50%;width:'}}{{item.barW}}%"></view>
+        </view>
+        <text class="ypct {{item.cls}}">{{item.pct}}</text>
+      </view>
+    </view>
+
     <view class="card">
       <view class="meta">{{metaLine}}</view>
       <view wx:if="{{note}}" class="meta note">{{note}}</view>
