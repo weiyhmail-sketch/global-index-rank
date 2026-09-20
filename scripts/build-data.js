@@ -18,7 +18,7 @@ const path = require("path");
 const { INDICES, GROUP_NAMES, TIER_NAMES, CURRENCIES } = require("../cloudfunctions/lib/indices.js");
 const { fetchIndex } = require("../cloudfunctions/lib/sources.js");
 const { fetchFX } = require("../cloudfunctions/lib/fx.js");
-const { buildSnapshot, buildRankDelta } = require("../cloudfunctions/lib/snapshot.js");
+const { buildSnapshot, buildRankDelta, buildMonthly } = require("../cloudfunctions/lib/snapshot.js");
 
 const OUT = path.join(__dirname, "..", "dist");
 const ANCHORS = [
@@ -63,6 +63,7 @@ async function pool(items, limit, fn) {
   const got = INDICES.filter((m) => series[m.code]);
   const { meta, snapshot, windows } = buildSnapshot(got, series, fx.rates, { anchors: ANCHORS });
   const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS });
+  const monthly = buildMonthly(got, series, fx.rates, { years: 6 });
   const asofs = meta.map((m) => m.asof).sort();
 
   fs.writeFileSync(fxPath, JSON.stringify(fx));
@@ -72,7 +73,7 @@ async function pool(items, limit, fn) {
     countries: new Set(meta.map((m) => m.country)).size,
     windows, anchors: ANCHORS, groupNames: GROUP_NAMES, tierNames: TIER_NAMES,
     fxMissing: fx.missing, rankDeltaDays: 7,
-    meta, snapshot, rankDelta,
+    meta, snapshot, rankDelta, monthly,
   }));
   // 整包 series.json 保留（便于本地调试），但云函数不用它：
   // gzip 后仍有 329 KB、实测 2.57 秒，离 3 秒超时太近。

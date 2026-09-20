@@ -167,4 +167,77 @@ function buildRankDelta(indices, seriesByCode, fxRates, opts = {}) {
   return out;
 }
 
-module.exports = { buildSnapshot, buildRankDelta, WINDOWS, at, toPairs, minusMonths, shiftDays };
+/**
+ * 各月末的点位（三种计价口径）。
+ *
+ * 目的是让客户端能算任意两个月之间的涨幅，而不必下载全部日线序列。
+ * 这不是近似：取的是「该月末或之前最近一个交易日」的真实收盘价，
+ * 与预置窗口用的是同一套取值规则，只是把可选起点限制到月粒度。
+ *
+ * 体积：33 指数 × 72 个月 × 3 口径 ≈ 7000 个数字，压成共享月份表 + 数组后约 70 KB。
+ *
+ * @returns { months: ["YYYY-MM", ...], levels: { code: { local: [], usd: [], cny: [] } } }
+ */
+/**
+ * 保留 n 位有效数字。
+ *
+ * 不能用固定小数位：换算成美元后，印尼指数约 0.39、越南约 0.07，
+ * 定点保留 3 位小数的相对误差可达 0.13%，足以让月末推算的涨幅
+ * 与快照对不上（实测差 0.11 个百分点）。
+ */
+function sig(v, n) {
+  if (v === 0) return 0;
+  const d = Math.ceil(Math.log10(Math.abs(v)));
+  const f = Math.pow(10, n - d);
+  return Math.round(v * f) / f;
+}
+
+function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
+  const { years = 6 } = opts;
+  const fxPairs = Object.fromEntries(Object.entries(fxRates).map(([c, s]) => [c, toPairs(s)]));
+
+  // 全局最新日期决定月份表的右端
+  let maxDate = "";
+  for (const m of indices) {
+    const raw = seriesByCode[m.code];
+    if (!raw) continue;
+    const ks = Object.keys(raw).sort();
+    if (ks.length && ks[ks.length - 1] > maxDate) maxDate = ks[ks.length - 1];
+  }
+  if (!maxDate) return { months: [], levels: {} };
+
+  const months = [];
+  let cur = maxDate.slice(0, 7);
+  for (let i = 0; i < years * 12 + 1; i++) {
+    months.unshift(cur);
+    const [y, mo] = cur.split("-").map(Number);
+    cur = mo === 1 ? `${y - 1}-12` : `${y}-${String(mo - 1).padStart(2, "0")}`;
+  }
+  // 每个月取该月最后一天（当月则取最新交易日）
+  const cutoffs = months.map((mm) => {
+    const [y, mo] = mm.split("-").map(Number);
+    const last = new Date(Date.UTC(y, mo, 0)).toISOString().slice(0, 10);
+    return last > maxDate ? maxDate : last;
+  });
+
+  const levels = {};
+  for (const m of indices) {
+    const raw = seriesByCode[m.code];
+    if (!raw) continue;
+    const series = toPairs(raw);
+    const level = makeLevelFn(series, m.ccy, fxPairs);
+    const first = series[0][0];
+    const row = { local: [], usd: [], cny: [] };
+    cutoffs.forEach((d) => {
+      for (const cur2 of ["local", "usd", "cny"]) {
+        // 数据起点之前一律为 null，不外推
+        const v = d < first ? null : level(d, cur2);
+        row[cur2].push(v === null || v === undefined ? null : sig(v, 8));
+      }
+    });
+    levels[m.code] = row;
+  }
+  return { months, levels };
+}
+
+module.exports = { buildSnapshot, buildRankDelta, buildMonthly, WINDOWS, at, toPairs, minusMonths, shiftDays };

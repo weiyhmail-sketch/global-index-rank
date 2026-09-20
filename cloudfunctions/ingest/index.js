@@ -54,30 +54,48 @@ async function fetchWithFallback(file) {
   throw new Error(`两个源都取不到 ${file}：${last && last.message}`);
 }
 
-exports.main = async () => {
+async function upsert(col, id, doc) {
+  try { await db.collection(col).doc(id).set({ data: doc }); }
+  catch (e) { await db.collection(col).add({ data: { _id: id, ...doc } }); }
+}
+
+/**
+ * @param event.what "snapshot"(默认) | "fx" | "all"
+ *   分开吃是因为 3 秒超时：快照 40 KB 很轻，汇率表 gzip 后约 200 KB，
+ *   合在一起有超时风险。默认只吃快照——那是首屏必需的；
+ *   汇率仅自定义区间用得到，可单独触发。
+ */
+exports.main = async (event = {}) => {
   const t0 = Date.now();
-  try { await db.createCollection("index_snapshot"); } catch (e) { /* 已存在 */ }
+  const what = event.what || "snapshot";
+  const out = { ok: true, did: [] };
 
-  const { body, url } = await fetchWithFallback("snapshot.json");
-  const snap = JSON.parse(body);
-  const doc = { ...snap, ingestedAt: new Date(), sourceUrl: url };
-
-  try {
-    await db.collection("index_snapshot").doc("latest").set({ data: doc });
-  } catch (e) {
-    await db.collection("index_snapshot").add({ data: { _id: "latest", ...doc } });
+  if (what === "snapshot" || what === "all") {
+    try { await db.createCollection("index_snapshot"); } catch (e) { /* 已存在 */ }
+    const { body, url } = await fetchWithFallback("snapshot.json");
+    const snap = JSON.parse(body);
+    await upsert("index_snapshot", "latest", { ...snap, ingestedAt: new Date(), sourceUrl: url });
+    out.did.push("snapshot");
+    Object.assign(out, {
+      bytes: Buffer.byteLength(body),
+      from: url.includes("jsdelivr") ? "jsDelivr" : "raw.githubusercontent",
+      indices: snap.meta.length, countries: snap.countries,
+      dataAsof: snap.dataAsof, builtAt: snap.generated,
+    });
   }
 
-  return {
-    ok: true,
-    ms: Date.now() - t0,
-    bytes: Buffer.byteLength(body),
-    from: url.includes("jsdelivr") ? "jsDelivr" : "raw.githubusercontent",
-    indices: snap.meta.length,
-    countries: snap.countries,
-    dataAsof: snap.dataAsof,
-    builtAt: snap.generated,
-  };
+  if (what === "fx" || what === "all") {
+    try { await db.createCollection("fx_daily"); } catch (e) { /* 已存在 */ }
+    const { body } = await fetchWithFallback("fx.json");
+    const fx = JSON.parse(body);
+    await upsert("fx_daily", "latest", { ...fx, ingestedAt: new Date() });
+    out.did.push("fx");
+    out.fxBytes = Buffer.byteLength(body);
+    out.fxCount = Object.keys(fx.rates || {}).length;
+  }
+
+  out.ms = Date.now() - t0;
+  return out;
 };
 
 /*
