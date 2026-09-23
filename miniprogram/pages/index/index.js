@@ -39,14 +39,21 @@ Page({
   },
 
   onLoad() { this.load(); },
-  onPullDownRefresh() { this.load(true); },
+  onPullDownRefresh() { return this.load(true); },
 
   async load(isPull) {
+    // 下拉刷新要保留用户当前的区间选择。原先无条件把 winIdx 重置成「今年以来」
+    // 却不动 isCustom：自定义模式下刷新后，筛选条写着「今年以来」，
+    // 榜单和结论条却还是自定义区间的数——而且是旧的月度数据。
+    const prevKey = this.wins && this.wins[this.data.winIdx] ? this.wins[this.data.winIdx].key : null;
+    const prevMonths = this.monthly
+      ? [this.monthly.months[this.data.m0Idx], this.monthly.months[this.data.m1Idx]] : null;
     this.setData({ loading: true, error: "" });
     try {
       const d = await call("get-snapshot");
       if (!d || !d.ok) throw new Error((d && d.error) || "数据为空");
       this.raw = d;
+      this.monthly = null;   // 月度数据跟着快照一起作废，要用时重取
 
       // 窗口选项 = 预置窗口 + 事件锚点
       this.wins = [
@@ -65,11 +72,13 @@ Page({
       this.baseAsof = Object.keys(counts).sort((a, b) => counts[b] - counts[a] || (a < b ? 1 : -1))[0];
 
       const ytd = this.wins.findIndex((w) => w.key === "ytd");
+      const kept = prevKey ? this.wins.findIndex((w) => w.key === prevKey) : -1;
+      const winIdx = this.data.isCustom ? this.wins.length : kept >= 0 ? kept : Math.max(0, ytd);
       this.setData({
         winOptions: this.winLabels(d, CURS[this.data.curIdx].key),
-        winChip: (this.wins[ytd < 0 ? 0 : ytd] || {}).label || "",
+        winChip: this.chipLabel(winIdx),
         grpOptions: this.grps.map((g) => g.label),
-        winIdx: ytd < 0 ? 0 : ytd,
+        winIdx,
         sub: `${d.countries} 个国家与地区 · ${d.meta.length} 个指数 · 数据截至 ${this.baseAsof}`,
         // 构建侧算了新鲜度却没人读，等于白算
         staleNote: [
@@ -83,7 +92,8 @@ Page({
         ].filter(Boolean).join(" · "),
         loading: false,
       });
-      this.render();
+      if (this.data.isCustom) await this.ensureMonthly(prevMonths);
+      else this.render();
     } catch (e) {
       this.setData({ loading: false, error: e.message || String(e) });
     } finally {
@@ -97,6 +107,7 @@ Page({
   onWin(e) {
     const i = +e.detail.value;
     const isCustom = i === this.wins.length;   // 最后一项是「自定义月度区间…」
+    if (isCustom && !this.data.isCustom) this.prevWinIdx = this.data.winIdx;
     this.setData({ winIdx: i, isCustom, expanded: "", winChip: this.chipLabel(i) });
     if (isCustom) return this.ensureMonthly();
     this.render();
@@ -107,7 +118,7 @@ Page({
    *
    * 不并入首屏数据：它占快照六成体积，而多数用户不会打开自定义区间。
    */
-  async ensureMonthly() {
+  async ensureMonthly(keep) {
     if (this.monthly) return this.render();
     this.setData({ monthlyLoading: true });
     try {
@@ -116,11 +127,20 @@ Page({
       this.monthly = d;
       const n = d.months.length;
       this.setData({ monthOptions: d.months, monthlyLoading: false });
-      // 默认起点取去年末，终点取最新；两个 range 也在这里一并算出来
-      this.syncMonthPickers(Math.max(0, d.months.indexOf(String(+d.dataAsof.slice(0, 4) - 1) + "-12")), n - 1);
+      // 刷新时沿用原先选的两个月份；首次进入则默认起点取去年末、终点取最新
+      const i0 = keep ? d.months.indexOf(keep[0]) : -1;
+      const i1 = keep ? d.months.indexOf(keep[1]) : -1;
+      this.syncMonthPickers(
+        i0 >= 0 ? i0 : Math.max(0, d.months.indexOf(String(+d.dataAsof.slice(0, 4) - 1) + "-12")),
+        i1 >= 0 ? i1 : n - 1);
       this.render();
     } catch (e) {
-      this.setData({ monthlyLoading: false, error: e.message || String(e) });
+      // 不能写全局 error：那会把整张榜单藏起来，而快照明明是好的。
+      // 退回进入自定义之前的区间，榜单照常显示，只提示月度数据没取到。
+      const back = Math.max(0, Math.min(this.prevWinIdx || 0, this.wins.length - 1));
+      this.setData({ monthlyLoading: false, isCustom: false, winIdx: back, winChip: this.chipLabel(back) });
+      this.render();
+      if (wx.showToast) wx.showToast({ title: "月度数据加载失败，请稍后再试", icon: "none" });
     }
   },
 
@@ -269,6 +289,8 @@ Page({
         //            超过回溯上限）。这时再写「数据自 2022-08-08 起」+「近3月数据不足」
         //            就是自相矛盾——实测这两句话真的同时出现在屏幕上。
         naNote: r.why === "gap" ? "起点落在休市期内，无可比收盘价"
+              // 年初几天东京、A 股还没开市，它们没有「今年以来」
+              : r.why === "notyet" ? `今年尚未开市（最新 ${r.m.asof}）`
               // 被频率校验截断过的，要说清是我们剔除的，而不是源里就没有
               : r.why === "short" ? (r.m.truncNote || `数据自 ${r.m.start} 起`)
               : "",

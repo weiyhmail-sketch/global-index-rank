@@ -34,7 +34,8 @@ https.get = (url, opts, cb) => {
   // （第一版就这么错过，四次重定向后退到备源，看起来像代码 bug 其实是桩的锅）
   const redirected = url.includes("/redirected/");
   const req = new EventEmitter();
-  req.destroy = () => {};
+  let dead = false;
+  req.destroy = () => { dead = true; };
   const p = redirected ? { ms: plan[host].ms, body: plan[host].redirectBody } : plan[host];
   // 真实 https 在 opts.timeout 到点时会 emit "timeout"，桩要照做
   if (p.hang) { setTimeout(() => req.emit("timeout"), opts.timeout); return req; }
@@ -50,6 +51,17 @@ https.get = (url, opts, cb) => {
     res.headers = gzip ? { "content-encoding": "gzip" } : {};
     cb(res);
     const body = gzip ? zlib.gzipSync(Buffer.from(p.body || "")) : Buffer.from(p.body || "");
+    if (p.drip) {
+      // 源端限速：每 100ms 吐一小块，连接从不空闲，所以 https 的 timeout 永远不响。
+      // 共吐 60 块(6 秒)，远超 3 秒硬线；被 destroy 就停。
+      let i = 0;
+      const t = setInterval(() => {
+        if (dead || i >= 60) { clearInterval(t); if (!dead) res.end(); return; }
+        res.write(body.slice(Math.floor(i * body.length / 60), Math.floor((i + 1) * body.length / 60)));
+        i++;
+      }, 100);
+      return;
+    }
     if (p.cutAfterFirstChunk) {
       // 先吐半截再让 res 出错：pipe() 不转发源流的错误，
       // 若 res 上没有 error 监听器，这里会抛未捕获异常把整个进程带走
@@ -122,6 +134,18 @@ const RAW = "raw.githubusercontent.com", JSD = "cdn.jsdelivr.net";
             { wantData: { a: 1 }, wantHost: RAW });
   // res 上若没有 error 监听器，这一条会让进程直接崩掉（退出码非 0），而不是走到断言
   await run("响应中途断流", { [RAW]: { ms: 20, cutAfterFirstChunk: 1, ...good }, [JSD]: { ms: 200, ...alt } },
+            { wantData: { a: 2 }, wantHost: JSD });
+
+  // ---- 第三轮审计补的两种 ----
+  // 主源回 200 但不是 JSON（限流页、代理注入页）。解析原先在竞速之外，
+  // 主源照样「赢」，然后 parse 抛错，好好的备源没机会上场。
+  await run("主源 200 非 JSON", { [RAW]: { ms: 20, body: "<html>rate limited</html>" }, [JSD]: { ms: 200, ...alt } },
+            { wantData: { a: 2 }, wantHost: JSD });
+  // 两源都在限速滴流：只有空闲超时的话，要 6 秒才返回
+  await run("两源皆滴流",   { [RAW]: { ms: 20, drip: 1, ...good }, [JSD]: { ms: 20, drip: 1, ...alt } },
+            { expectFail: true });
+  // 主源滴流、备源正常：备源在 HEDGE_AT 点火后应当胜出
+  await run("主源滴流",     { [RAW]: { ms: 20, drip: 1, ...good }, [JSD]: { ms: 200, ...alt } },
             { wantData: { a: 2 }, wantHost: JSD });
 
   console.log(fails.length ? "\n❌ " + fails.join("\n❌ ")

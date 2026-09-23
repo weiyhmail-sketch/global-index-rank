@@ -102,6 +102,19 @@ function makeLevelFn(series, ccy, fxPairs) {
 }
 
 /**
+ * 外币口径能不能算：本币与人民币都得有汇率，且都没停更。
+ *
+ * 快照、月末点位、走势图三处必须用同一个判据。原先只有 buildSnapshot 看
+ * fxStale，另外三份产物照样拿陈旧汇率硬算——实测 BRL 停更 20 天时，
+ * 快照的「今年以来·人民币」是「—」，自定义区间却算出 +19.50% 并参与排名，
+ * 详情页的逐年列表也写着「2026 年初至今 +19.50%」，和同页格子自相矛盾。
+ */
+function fxUsable(ccy, fxPairs, staleCcy) {
+  const has = (c) => !!(fxPairs[c] && fxPairs[c].length);
+  return (ccy === "USD" || has(ccy)) && has("CNY") && !staleCcy.has(ccy) && !staleCcy.has("CNY");
+}
+
+/**
  * @param seriesByCode { code: {date: close} }
  * @param fxRates      { ccy: {date: rate} }
  * @param opts.endShiftDays 把所有窗口的终点整体往前挪 N 天（用于回溯算历史名次）
@@ -127,6 +140,8 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
   const fxBaseline = Object.values(fxPairs).map((a) => a[0][0]).sort()[0] || "";
   const meta = [], snapshot = {};
 
+  // 先把各指数的序列切好，才能知道全局最新日期落在哪一年
+  const prepared = [];
   for (const m of indices) {
     const raw = seriesByCode[m.code];
     if (!raw || !Object.keys(raw).length) continue;
@@ -137,13 +152,23 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       series = series.filter((p) => p[0] <= cut);
       if (series.length < 2) continue;
     }
+    prepared.push([m, series]);
+  }
+  // 「今年」是全局的，不能按各指数自己的最新日期算。
+  //
+  // 原先 ytd 起点 = 各自 asof 所在年份的上一年末。1 月初东京、A 股还在休市，
+  // 它们的 asof 停在去年 12 月，于是它们的「今年以来」其实是去年全年——
+  // 实测把数据截到 2026-01-02：日本 +22.05%、中国 +18.41% 占住核心榜前两名，
+  // 其余市场都在 ±3% 之内。今年还没开市的指数没有「今年以来」可言，置空。
+  const refYear = (prepared.map(([, s]) => s[s.length - 1][0]).sort().pop() || "").slice(0, 4);
+
+  for (const [m, series] of prepared) {
     const asof = series[series.length - 1][0];
     const first = series[0][0];
     const maxBack = backtrackLimit(series);
     const level = makeLevelFn(series, m.ccy, fxPairs);
     // 本币或人民币任一停更，外币换算就不可信 —— 换算要两端汇率
-    const canFx = (m.ccy === "USD" || !!fxPairs[m.ccy]) && !!fxPairs.CNY
-      && !staleCcy.has(m.ccy) && !staleCcy.has("CNY");
+    const canFx = fxUsable(m.ccy, fxPairs, staleCcy);
 
     const prevTradingDay = series.length > 1 ? series[series.length - 2][0] : null;
     const starts = {
@@ -151,7 +176,7 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       w1: shiftDays(asof, -7),
       m1: minusMonths(asof, 1),
       m3: minusMonths(asof, 3),
-      ytd: `${+asof.slice(0, 4) - 1}-12-31`,
+      ytd: asof.slice(0, 4) === refYear ? `${+refYear - 1}-12-31` : null,
       y1: minusMonths(asof, 12),
       y3: minusMonths(asof, 36),
       y5: minusMonths(asof, 60),
@@ -182,7 +207,8 @@ function buildSnapshot(indices, seriesByCode, fxRates, opts = {}) {
       //   short —— 该指数历史不够长，「数据自 X 起」是真话
       //   gap   —— 历史够长，只是起点落在休市期内(如农历新年)回溯超限，
       //            这时候说「数据自 X 起」就是假话
-      if (!st || st < first) row[key].why = "short";
+      if (key === "ytd" && !st) row[key].why = "notyet";
+      else if (!st || st < first) row[key].why = "short";
       else if (tooFar) row[key].why = "gap";
       else if (spans[key]) row[key].back = spans[key];
 
@@ -332,7 +358,8 @@ function sig(v, n) {
 }
 
 function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
-  const { years = 6 } = opts;
+  const { years = 6, fxStale = [] } = opts;
+  const staleCcy = new Set(fxStale.map((x) => x.ccy));
   const fxPairs = Object.fromEntries(Object.entries(fxRates).map(([c, s]) => [c, toPairs(s)]));
 
   // 全局最新日期决定月份表的右端
@@ -364,14 +391,14 @@ function buildMonthly(indices, seriesByCode, fxRates, opts = {}) {
     const raw = seriesByCode[m.code];
     if (!raw) continue;
     const series = toPairs(raw);
-    const maxBack = backtrackLimit(series);
     const level = makeLevelFn(series, m.ccy, fxPairs);
+    const canFx = fxUsable(m.ccy, fxPairs, staleCcy);
     const first = series[0][0];
     const row = { local: [], usd: [], cny: [] };
     cutoffs.forEach((d) => {
       for (const cur2 of ["local", "usd", "cny"]) {
-        // 数据起点之前一律为 null，不外推
-        const v = d < first ? null : level(d, cur2);
+        // 数据起点之前一律为 null，不外推；汇率不可用时外币口径整列为空
+        const v = d < first || (cur2 !== "local" && !canFx) ? null : level(d, cur2);
         row[cur2].push(v === null || v === undefined ? null : sig(v, 8));
       }
     });
@@ -404,7 +431,8 @@ function isoWeek(iso) {
 }
 
 function buildChart(meta, series, fxPairs, opts = {}) {
-  const { years = 5 } = opts;
+  const { years = 5, fxStale = [] } = opts;
+  const canFx = fxUsable(meta.ccy, fxPairs, new Set(fxStale.map((x) => x.ccy)));
   const pairs = toPairs(series);
   const cutoff = minusMonths(pairs[pairs.length - 1][0], years * 12);
   // 多留一个 cutoff 之前的点：预置区间的基准是「该日或之前最近一个交易日」，
@@ -433,7 +461,7 @@ function buildChart(meta, series, fxPairs, opts = {}) {
   for (const [d] of kept) {
     out.dates.push(d);
     for (const cur of ["local", "usd", "cny"]) {
-      const v = level(d, cur);
+      const v = cur !== "local" && !canFx ? null : level(d, cur);
       out[cur].push(v === null || v === undefined ? null : sig(v, 8));
     }
   }

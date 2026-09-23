@@ -43,6 +43,13 @@ const sources = (f) => [
 
 function get(url, timeout, depth = 0) {
   return new Promise((resolve, reject) => {
+    // https.get 的 timeout 只管「空闲」：连接一直有字节进来就永远不触发。
+    // 源端限速、每 200ms 吐 1 字节，实测 5.2 秒才返回，函数早在 3 秒被杀了。
+    // 所以另挂一个总时长的截止线，到点直接放弃这条腿。
+    const t0 = Date.now();
+    const deadline = setTimeout(() => { reject(new Error("timeout")); req.destroy(); }, timeout);
+    const done = (fn) => (v) => { clearTimeout(deadline); fn(v); };
+    resolve = done(resolve); reject = done(reject);
     const req = https.get(url, {
       headers: { "User-Agent": "index-rank", "Accept-Encoding": "gzip" }, timeout,
     }, (res) => {
@@ -55,7 +62,8 @@ function get(url, timeout, depth = 0) {
       if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location) {
         res.resume();
         if (depth >= 3) return reject(new Error("重定向过多"));
-        return resolve(get(res.headers.location, timeout, depth + 1));
+        // 重定向后的那一跳只能用剩下的时间，不能重新领一份完整的 timeout
+        return resolve(get(res.headers.location, Math.max(1, timeout - (Date.now() - t0)), depth + 1));
       }
       const chunks = [];
       const st = res.headers["content-encoding"] === "gzip" ? res.pipe(zlib.createGunzip()) : res;
@@ -125,13 +133,14 @@ async function fetchJSON(file) {
     // 下限 200：当前调用路径下 left() 恒 ≥1600，但只要有人调大 HEDGE_AT、
     // 加第三条腿，或者事件循环被阻塞过 BUDGET，它就会变成负数
     // （实测拆掉对冲定时器时 Node 打过 TimeoutNegativeWarning: -3）。
-    get(url, Math.max(200, left())).then(
-      (body) => ({ url, body }),
-      (e) => {
-        errs.push(`${url.split("/")[2]} ${e.message}`);
+    get(url, Math.max(200, left()))
+      // 解析必须在竞速之内：放在外面的话，主源回一个 200 的限流页/代理页，
+      // 它照样「赢」，然后 JSON.parse 抛错，好好的备源根本没机会上场。
+      .then((body) => ({ url, body, data: JSON.parse(body) }))
+      .catch((e) => {
+        errs.push(`${url.split("/")[2]} ${e.message.slice(0, 60)}`);
         throw e;
-      }
-    );
+      });
 
   // 备源的位置先占住再说：它可能由超时点燃，也可能由主源失败提前点燃，
   // 而竞速要在它起跑之前就把这个位置排进去，否则提前点燃的备源赢了也没人接。
@@ -160,7 +169,7 @@ async function fetchJSON(file) {
     clearTimeout(timer); // 主源赢了就别再多发一次请求
   }
   return {
-    data: JSON.parse(won.body),
+    data: won.data,
     url: won.url,
     ms: Date.now() - t0,
     bytes: Buffer.byteLength(won.body),

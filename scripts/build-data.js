@@ -130,7 +130,7 @@ async function pool(items, limit, fn) {
     if (t) { m.srcStart = t.srcStart; m.truncNote = `${t.cutYear} 年及以前源数据为月频，已剔除；日频自 ${t.cut} 起`; }
   }
   const rankDelta = buildRankDelta(got, series, fx.rates, { days: 7, anchors: ANCHORS, fxStale: fx.fxStale });
-  const monthly = buildMonthly(got, series, fx.rates, { years: 6 });
+  const monthly = buildMonthly(got, series, fx.rates, { years: 6, fxStale: fx.fxStale });
   const yearly = buildYearly(monthly, { years: 6 });
   const asofs = meta.map((m) => m.asof).sort();
 
@@ -181,7 +181,7 @@ async function pool(items, limit, fn) {
   fs.mkdirSync(chartDir, { recursive: true });
   const fxPairs = Object.fromEntries(Object.entries(fx.rates).map(([c, s]) => [c, toPairs(s)]));
   for (const m of got) {
-    const c = buildChart(m, series[m.code], fxPairs, { years: 5 });
+    const c = buildChart(m, series[m.code], fxPairs, { years: 5, fxStale: fx.fxStale });
     fs.writeFileSync(path.join(chartDir, m.code + ".json"),
       JSON.stringify({ generated: GENERATED, code: m.code, ccy: m.ccy, n: c.dates.length, ...c }));
   }

@@ -8,7 +8,6 @@ const fs = require("fs");
 const path = require("path");
 const D = (f) => JSON.parse(fs.readFileSync(path.join(__dirname, "..", "dist", f), "utf8"));
 const snapshot = D("snapshot.json");
-const chart = D("chart/KS11.json");
 
 let inst = null;
 global.Page = (opts) => { inst = Object.assign({}, opts); inst.data = Object.assign({}, opts.data);
@@ -20,6 +19,7 @@ global.wx = {
     // 那条验证根本没跑到被测代码——对抗性审查正是从这里找到 40pt 的偏差。
     callFunction: async ({ name, data }) => {
       if (name !== "get-chart") return { result: { ok: true, ...snapshot } };
+      const chart = D(`chart/${data.code}.json`);
       let { dates, local, usd, cny } = chart;
       let truncated = false;
       if (data.from) {
@@ -165,6 +165,30 @@ require("../miniprogram/pages/detail/detail.js");
         `令牌是 ${inst.rangeToken} —— 加载失败后每次切区间都会被当成过期请求丢弃`);
   check(!threw, `onRange 抛出未捕获异常: ${threw}`);
 
+
+  // 缺汇率不能说成「数据不足」
+  //
+  // 第三轮审计：快照为空时标题一律写「数据自 X 起，不足3年」。台湾加权有 3.8 年
+  // 原币数据，近3年·人民币为空只是因为新台币汇率 2024-03 才有——这句话是假的，
+  // 而首页同一个格子的说明是对的。从数据里找这样的组合，别写死指数名。
+  console.log("\n缺汇率时的图表标题:");
+  const fxCase = snapshot.meta.map((m) => {
+    const ri = [4, 3, 2, 1, 0].find((k) => {
+      const w = snapshot.snapshot[m.code][["m1", "m3", "y1", "y3", "y5"][k]];
+      return w.cny === null && w.local !== null && !w.why;
+    });
+    return ri === undefined ? null : { m, ri };
+  }).find(Boolean);
+  check(!!fxCase, "数据里找不到「原币有、人民币缺」的组合，这个用例没测到东西");
+  if (fxCase) {
+    inst.snap = undefined; inst.m = undefined; inst.chart = undefined; inst.chartCache = {};
+    inst.onLoad({ code: fxCase.m.code, cur: "cny" });
+    await new Promise((r) => setTimeout(r, 300));
+    await inst.onRange({ detail: { value: fxCase.ri } });
+    const st = inst.data.chartStat;
+    console.log(`  ${fxCase.m.country} ${inst.data.rangeOptions[fxCase.ri]}·人民币：「${st}」`);
+    check(/汇率/.test(st) && !/不足/.test(st), `${fxCase.m.country} 缺的是汇率，标题却说「${st}」`);
+  }
 
   // 快照与走势图来自不同构建时，必须说出来
   //

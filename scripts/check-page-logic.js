@@ -138,6 +138,43 @@ require("../miniprogram/pages/index/index.js");
   check(bad === 0, `月度区间 picker 有 ${bad} 种选择会产生非法状态`);
   console.log(bad === 0 ? `  ${inst.data.m0Options.length} + ${mn - 1} 种选择 + 6 个越界值，全部合法 ✅` : "");
 
+  // ---- 下拉刷新不能让筛选条和榜单分家 ----
+  //
+  // 第三轮审计：load() 把 winIdx 重置成「今年以来」却不动 isCustom，
+  // 自定义模式下刷新后筛选条写「今年以来」，榜单却还是自定义区间（而且是旧的月度数据）。
+  console.log("\n下拉刷新:");
+  const realCall = wx.cloud.callFunction;
+  let monthlyCalls = 0;
+  wx.cloud.callFunction = async (a) => { if (a.name === "get-monthly") monthlyCalls++; return realCall(a); };
+  inst.onM0({ detail: { value: 3 } });
+  const pick = [inst.data.monthOptions[inst.data.m0Idx], inst.data.monthOptions[inst.data.m1Idx]];
+  const before = inst.data.ledeHead;
+  monthlyCalls = 0;
+  await inst.onPullDownRefresh();
+  console.log(`  自定义模式刷新后：筛选条「${inst.data.winChip}」· 结论条「${inst.data.ledeHead}」`);
+  check(inst.data.isCustom && inst.data.winChip === "自定义区间", `自定义模式刷新后筛选条变成了「${inst.data.winChip}」`);
+  check(inst.data.ledeHead === before, `刷新后结论条变了：「${before}」→「${inst.data.ledeHead}」`);
+  check(inst.data.monthOptions[inst.data.m0Idx] === pick[0] && inst.data.monthOptions[inst.data.m1Idx] === pick[1],
+    "刷新后丢了用户选的月份");
+  check(monthlyCalls === 1, `刷新后月度数据应重取 1 次，实际 ${monthlyCalls} 次（没重取就是旧数据）`);
+
+  const ak = inst.wins.findIndex((w) => w.key.startsWith("anchor:"));
+  await inst.onWin({ detail: { value: ak } });
+  await inst.onPullDownRefresh();
+  console.log(`  锚点区间刷新后：筛选条「${inst.data.winChip}」`);
+  check(!inst.data.isCustom && inst.data.winIdx === ak && inst.data.winChip === inst.wins[ak].label,
+    `刷新把用户选的「${inst.wins[ak].label}」重置成了「${inst.data.winChip}」`);
+
+  // 月度数据取失败：不能把整张榜单藏起来，要退回原区间
+  inst.monthly = null;
+  wx.cloud.callFunction = async (a) => (a.name === "get-monthly" ? { result: { ok: false, error: "模拟失败" } } : realCall(a));
+  await inst.onWin({ detail: { value: inst.wins.length } });
+  console.log(`  月度数据取失败：error「${inst.data.error}」· 筛选条「${inst.data.winChip}」· ${inst.data.rows.length} 行`);
+  check(!inst.data.error, "月度数据取失败写了全局 error，整张榜单被藏起来了");
+  check(!inst.data.isCustom && inst.data.winIdx === ak, "月度数据取失败后没有退回进入自定义之前的区间");
+  check(inst.data.rows.length > 0, "月度数据取失败后榜单为空");
+  wx.cloud.callFunction = realCall;
+
   // ---- 口径说明页与代码是否还对得上 ----
   //
   // 加这一节是因为：修复时新写了「口径不完整的市场」一节，旧的「汇率缺失」一节

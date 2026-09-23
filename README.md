@@ -60,7 +60,7 @@ node scripts/build-data.js          # 完整构建 → dist/（约 2-3 秒）
 gh workflow run daily.yml           # 手动触发线上构建
 ```
 
-验证（七个，都能直接跑）：
+验证（八个，都能直接跑）：
 
 ```bash
 node scripts/check-golden.js        # 黄金测试：2319 个数值 vs 签入期望值
@@ -68,7 +68,8 @@ node scripts/check-page-logic.js    # 首页逻辑 + 月份 picker 穷举 + 文�
 node scripts/check-detail-logic.js  # 详情页图表/格子一致性 + 竞态 + 加载失败路径
 node scripts/check-cdn-hedge.js     # 取数对冲的九种网络情形
 node scripts/check-count-guard.js   # 指数数量守卫会不会真的触发
-node scripts/check-fx-stale.js      # 汇率停更时是否如实退回原币口径
+node scripts/check-fx-stale.js      # 汇率停更时快照/月度/逐年/走势图是否都退回原币口径
+node scripts/check-ytd-boundary.js  # 跨年那几天「今年以来」不会把去年全年算进来
 node scripts/verify-node-vs-python.js   # 与 Python 原版的等价性（历史遗留）
 ```
 

@@ -195,10 +195,21 @@ Page({
       }
       if (pts.length > 1) {
         // 数字一律以快照为准，图表只负责画形状，从结构上消除第二个数据源
-        const snapV = ((s.snapshot[this.code] || {})[R.winKey] || {})[cur];
+        const cell = (s.snapshot[this.code] || {})[R.winKey] || {};
+        const snapV = cell[cur];
         if (snapV === null || snapV === undefined) {
-          // 快照说数据不够（起点早于该指数历史），图照画，但标题不能假装是 N 年
-          stat = `数据自 ${c.dates[0]} 起，不足${R.label.replace("近", "")}`;
+          // 快照给不出数，图照画，但标题要说对原因。三种成因说的话不一样，
+          // 和首页的 naNote 同一套口径：
+          //   short —— 历史确实不够长
+          //   gap   —— 历史够长，起点落在休市期内（台湾农历新年）
+          //   原币有、该口径没有 —— 缺汇率。原先一律写「数据自 X 起，不足3年」，
+          //   而台湾加权有 3.8 年原币数据，缺的只是 2024-03 之前的新台币汇率。
+          const hasLocal = cell.local !== null && cell.local !== undefined;
+          stat = cell.why === "gap" ? "起点落在休市期内，无可比收盘价"
+            : cur !== "local" && hasLocal
+              ? (m.fxFrom ? `${m.ccy} 汇率自 ${m.fxFrom} 起，${R.label}无${CURS[this.data.curIdx].label}口径`
+                          : `${m.ccy} 汇率不可用，${R.label}只有原币口径`)
+            : `数据自 ${c.dates[0]} 起，不足${R.label.replace("近", "")}`;
           this.draw(pts, pts[pts.length - 1][1] >= pts[0][1]);
         } else {
           stat = `${pts[0][0]} → ${pts[pts.length - 1][0]} · ${fmt(snapV)}`;
